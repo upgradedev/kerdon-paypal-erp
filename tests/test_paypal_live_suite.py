@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import io
 import json
+import sys
+import types
 import unittest
 from unittest.mock import MagicMock, patch
 import urllib.error
 
 import kerdon as kd
 import kerdon_aws as kaws
-from kerdon_aws.connectors_adapter import reset_connector_runtime_secrets
+from kerdon_aws.connectors_adapter import handle_post_connectors, reset_connector_runtime_secrets
 from kerdon_aws.paypal_live_client import ExternalProviderError, PayPalConnectorPlugin, parse_money_cents
 
 
@@ -53,6 +55,10 @@ class TestPayPalLiveSuite(unittest.TestCase):
         reset_connector_runtime_secrets()
         self.store = kaws.MultiTenantStore()
         self.tid = self.store.workspace.default_tenant_id
+
+    def tearDown(self) -> None:
+        kd.reset_connector_states()
+        reset_connector_runtime_secrets()
 
     def test_parse_money_cents_and_live_plugin_all_endpoints(self) -> None:
         self.assertEqual(parse_money_cents({"currency_code": "EUR", "value": "1240.35"}), 124_035)
@@ -292,6 +298,288 @@ class TestPayPalLiveSuite(unittest.TestCase):
             err_body = json.loads(r_502["body"])
             self.assertEqual(err_body["provider_issue"], "ORDER_NOT_APPROVED")
             self.assertEqual(err_body["paypal_debug_id"], "dbg-unapproved-42")
+
+    def test_strands_bedrock_tool_wrappers_replay_and_webhook_branches(self) -> None:
+        state = self.store.get_tenant_state(self.tid)
+        state.treasury.create_approval(
+            approval_id="apr-pp-agent-1",
+            counterparty_id="sup-aws-eu",
+            invoice_or_case_id="case-pp-1",
+            amount_cents=5_000,
+            currency="EUR",
+            evidence_sha256="a" * 64,
+            approver_id="act-cfo-approver",
+            now_epoch=1761950000,
+            recipient_account="seller-payout-sb@kerdon-synth.eu",
+        )
+        kaws.lambda_writer(
+            {
+                "rawPath": "/erp/connectors/config",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps({"paypal_client_id": "cid-live-2", "paypal_client_secret": "csec-live-2"}),
+            },
+            store=self.store,
+        )
+
+        dyn = {"order_status": "CREATED", "payout_fail": True}
+
+        def _agent_urlopen(req, timeout=10.0):
+            url = req.full_url
+            method = req.get_method()
+            if url.endswith("/v1/oauth2/token"):
+                return _FakeHttpResponse({"access_token": "tok-ag", "app_id": "APP-AG", "scope": "openid invoicing"})
+            if "/v1/customer/disputes" in url:
+                return _FakeHttpResponse({"items": [{"dispute_id": "PP-D-202"}]})
+            if url.endswith("/v2/checkout/orders") and method == "POST":
+                return _FakeHttpResponse(
+                    {
+                        "id": "2TPAGENT001",
+                        "status": "CREATED",
+                        "links": [{"rel": "approve", "href": "https://www.sandbox.paypal.com/checkoutnow?token=2TPAGENT001"}],
+                    },
+                    status=201,
+                )
+            if url.endswith("/v2/checkout/orders/2TPAGENT001") and method == "GET":
+                return _FakeHttpResponse({"id": "2TPAGENT001", "status": dyn["order_status"]})
+            if url.endswith("/v2/checkout/orders/2TPAGENT001/capture") and method == "POST":
+                return _FakeHttpResponse(
+                    {
+                        "id": "2TPAGENT001",
+                        "status": "COMPLETED",
+                        "purchase_units": [
+                            {
+                                "payments": {
+                                    "captures": [
+                                        {
+                                            "id": "CAP-AG-01",
+                                            "status": "COMPLETED",
+                                            "seller_receivable_breakdown": {
+                                                "gross_amount": {"currency_code": "EUR", "value": "500.00"},
+                                                "paypal_fee": {"currency_code": "EUR", "value": "14.85"},
+                                                "net_amount": {"currency_code": "EUR", "value": "485.15"},
+                                            },
+                                        }
+                                    ]
+                                }
+                            }
+                        ],
+                    }
+                )
+            if url.endswith("/v1/catalogs/products"):
+                return _FakeHttpResponse({"id": "PROD-AG-01"}, status=201)
+            if url.endswith("/v1/billing/plans"):
+                return _FakeHttpResponse({"id": "P-AG-01", "status": "ACTIVE"}, status=201)
+            if url.endswith("/v1/billing/subscriptions"):
+                return _FakeHttpResponse({"id": "I-AG-01", "status": "APPROVAL_PENDING", "links": []}, status=201)
+            if url.endswith("/v1/notifications/webhooks") and method == "GET":
+                return _FakeHttpResponse({"webhooks": []})
+            if url.endswith("/v1/notifications/webhooks") and method == "POST":
+                return _FakeHttpResponse(
+                    {"id": "WH-AG-01", "url": "https://dshvkidt3tkge.cloudfront.net/erp/connectors/paypal/webhook"}, status=201
+                )
+            if url.endswith("/v1/notifications/verify-webhook-signature"):
+                return _FakeHttpResponse({"verification_status": "SUCCESS"})
+            if url.endswith("/v1/payments/payouts/BATCH-AG-01") and method == "GET":
+                return _FakeHttpResponse({"batch_header": {"payout_batch_id": "BATCH-AG-01", "batch_status": "SUCCESS"}, "items": []})
+            if url.endswith("/v1/payments/payouts") and method == "POST":
+                if dyn["payout_fail"]:
+                    raise _make_http_error(422, "INSUFFICIENT_FUNDS", "Insufficient merchant funds", "dbg-nofunds-1")
+                return _FakeHttpResponse(
+                    {"batch_header": {"payout_batch_id": "BATCH-AG-01", "batch_status": "SUCCESS"}}, status=201
+                )
+            raise AssertionError(f"Unexpected URL: {method} {url}")
+
+        fake_strands = types.ModuleType("strands")
+        fake_models = types.ModuleType("strands.models")
+        fake_strands.tool = lambda fn: fn
+
+        class _FakeBedrockModel:
+            def __init__(self, **kwargs: object) -> None:
+                self.kwargs = kwargs
+
+        class _FakeAgent:
+            def __init__(self, model: object, system_prompt: str, tools: list) -> None:
+                self.tools = {fn.__name__: fn for fn in tools}
+
+            def __call__(self, goal: str) -> str:
+                self.tools["paypal_introspect_sandbox_status"]()
+                created = json.loads(self.tools["paypal_create_checkout_order_v2"]("auto"))
+                oid = created["order_id"]
+                unapproved = json.loads(self.tools["paypal_inspect_or_capture_order_v2"](oid))
+                assert unapproved["captured"] is False
+                dyn["order_status"] = "APPROVED"
+                captured = json.loads(self.tools["paypal_inspect_or_capture_order_v2"](oid))
+                assert captured["captured"] is True
+                self.tools["paypal_provision_subscription_plan_v1"]("Enterprise", 29_900)
+                self.tools["paypal_register_or_list_webhook_v1"]()
+                miss = json.loads(self.tools["paypal_diagnose_or_execute_payout_v1"]("non-existent"))
+                assert miss["status"] == "NO_VALID_FOUR_EYES_APPROVAL"
+                fail_closed = json.loads(self.tools["paypal_diagnose_or_execute_payout_v1"]("auto"))
+                assert fail_closed["status"] == "PROVIDER_REJECTED_FAIL_CLOSED"
+                dyn["payout_fail"] = False
+                paid = json.loads(self.tools["paypal_diagnose_or_execute_payout_v1"]("apr-pp-agent-1"))
+                assert paid["executed"] is True
+                return "Completed all 6 Strands PayPal tools."
+
+        fake_models.BedrockModel = _FakeBedrockModel
+        fake_strands.Agent = _FakeAgent
+
+        def _post_full(path: str, payload: dict) -> dict:
+            return kaws.lambda_writer(
+                {
+                    "rawPath": path,
+                    "requestContext": {"http": {"method": "POST", "path": path}},
+                    "body": json.dumps(payload),
+                },
+                store=self.store,
+            )
+
+        with patch("urllib.request.urlopen", side_effect=_agent_urlopen), patch.dict(
+            sys.modules, {"strands": fake_strands, "strands.models": fake_models}
+        ):
+            r_ver = _post_full("/erp/connectors/verify", {"connector": "paypal", "require_live": True})
+            self.assertEqual(r_ver["statusCode"], 200)
+            self.assertTrue(json.loads(r_ver["body"])["verification"]["paypal"]["live_verified"])
+
+            self.assertEqual(_post_full("/erp/connectors/paypal/disputes/sync", {})["statusCode"], 200)
+            self.assertEqual(_post_full("/erp/connectors/paypal/oauth/start", {})["statusCode"], 200)
+
+            agent_body = {"goal": "Execute full suite", "llm_mode": "bedrock", "require_live": True}
+            r_ag = _post_full("/erp/connectors/paypal/agent", agent_body)
+            self.assertEqual(r_ag["statusCode"], 200, r_ag["body"])
+            ag_out = json.loads(r_ag["body"])
+            self.assertIn("strands-bedrock-tools:", ag_out["engine"])
+            self.assertEqual(ag_out["tools_executed_count"], 9)
+
+            # Live API-verified webhooks for ORDER.APPROVED and SUBSCRIPTION.ACTIVATED
+            cs = kd.get_connector_state(state)
+            cs.pending_paypal_orders["ORD-WH-1"] = {"order_id": "ORD-WH-1", "status": "CREATED"}
+            r_wh1 = _post_full(
+                "/erp/connectors/paypal/webhook",
+                {
+                    "event_id": "WH-EVT-ORD-1",
+                    "event_type": "CHECKOUT.ORDER.APPROVED",
+                    "transmission_id": "tx-1",
+                    "transmission_time": "2026-11-11T10:00:00Z",
+                    "webhook_id": "WH-AG-01",
+                    "transmission_sig": "sig-1",
+                    "cert_url": "https://api.sandbox.paypal.com/cert.pem",
+                    "auth_algo": "SHA256withRSA",
+                    "resource": {"id": "ORD-WH-1"},
+                },
+            )
+            self.assertEqual(r_wh1["statusCode"], 200)
+            self.assertEqual(cs.pending_paypal_orders["ORD-WH-1"]["status"], "APPROVED")
+
+            r_wh2 = _post_full(
+                "/erp/connectors/paypal/webhook",
+                {
+                    "event_id": "WH-EVT-SUB-1",
+                    "event_type": "BILLING.SUBSCRIPTION.ACTIVATED",
+                    "transmission_id": "tx-2",
+                    "transmission_time": "2026-11-11T10:01:00Z",
+                    "webhook_id": "WH-AG-01",
+                    "transmission_sig": "sig-2",
+                    "cert_url": "https://api.sandbox.paypal.com/cert.pem",
+                    "auth_algo": "SHA256withRSA",
+                    "resource": {"id": "I-AG-01"},
+                },
+            )
+            self.assertEqual(r_wh2["statusCode"], 200)
+            self.assertEqual(cs.paypal_subscriptions["I-AG-01"]["status"], "ACTIVE")
+
+        # Replay branch verification across all extended PayPal routes (zero network calls)
+        replay_store = kaws.MultiTenantStore()
+        r_state = replay_store.get_tenant_state(self.tid)
+        r_state.treasury.create_approval(
+            approval_id="apr-pp-agent-1",
+            counterparty_id="sup-aws-eu",
+            invoice_or_case_id="case-pp-1",
+            amount_cents=5_000,
+            currency="EUR",
+            evidence_sha256="a" * 64,
+            approver_id="act-cfo-approver",
+            now_epoch=1761950000,
+            recipient_account="seller-payout-sb@kerdon-synth.eu",
+        )
+        r_cs = kd.get_connector_state(r_state)
+        r_cs.pending_paypal_orders["ORD-R-1"] = {"order_id": "ORD-R-1", "status": "CREATED"}
+        actor = kd.Actor(
+            actor_id="act-replay-writer",
+            display_name="Replay Writer",
+            role=kd.Role.MSP_FINOPS_DIRECTOR,
+            allowed_tenant_ids=frozenset({self.tid}),
+        )
+
+        def _replay_call(sub: str, payload: dict) -> dict:
+            res = handle_post_connectors(
+                self.tid,
+                sub,
+                r_state,
+                payload,
+                actor,
+                replay_store,
+                event={},
+                is_replay=True,
+            )
+            assert res is not None
+            return res
+
+        self.assertEqual(
+            _replay_call(
+                "connectors/paypal/order-status",
+                {"order_id": "ORD-R-1", "_replay_provider_receipt": {"id": "ORD-R-1", "status": "APPROVED"}},
+            )["statusCode"],
+            200,
+        )
+        self.assertEqual(r_cs.pending_paypal_orders["ORD-R-1"]["status"], "APPROVED")
+        self.assertEqual(
+            _replay_call(
+                "connectors/paypal/subscription",
+                {"_replay_provider_receipt": {"subscription_id": "I-REP-1", "status": "ACTIVE"}},
+            )["statusCode"],
+            201,
+        )
+        self.assertEqual(
+            _replay_call(
+                "connectors/paypal/webhooks/register",
+                {"_replay_provider_receipt": {"webhook_id": "WH-REP-1", "url": "https://example.org/wh"}},
+            )["statusCode"],
+            201,
+        )
+        self.assertEqual(
+            _replay_call(
+                "connectors/paypal/tracker",
+                {"capture_id": "CAP-R-1", "tracking_number": "DHL-R-1", "_replay_provider_receipt": {"tracker_identifiers": []}},
+            )["statusCode"],
+            201,
+        )
+        self.assertEqual(
+            _replay_call(
+                "connectors/paypal/oauth/callback",
+                {"code": "c-rep", "_replay_provider_receipt": {"payer_id": "PAYER-REP-1", "email": "r@kerdon-synth.eu"}},
+            )["statusCode"],
+            200,
+        )
+        self.assertEqual(
+            _replay_call(
+                "connectors/paypal/payout-sync",
+                {"payout_batch_id": "B-REP-1", "_replay_provider_receipt": {"batch_header": {"batch_status": "SUCCESS"}}},
+            )["statusCode"],
+            200,
+        )
+        # Replay agent receipt including create_order + capture + subscription + webhook + payout
+        replay_tools = list(ag_out["executed_tools"]) + [
+            {"tool": "paypal_create_checkout_order_v2", "result": {"order_id": "ORD-REP-2", "status": "CREATED"}}
+        ]
+        self.assertEqual(
+            _replay_call(
+                "connectors/paypal/agent",
+                {"goal": "Replay", "_replay_provider_receipt": {**ag_out, "executed_tools": replay_tools}},
+            )["statusCode"],
+            200,
+        )
+        self.assertEqual(r_state.treasury.approvals["apr-pp-agent-1"].state.value, "EXECUTED")
 
 
 if __name__ == "__main__":
