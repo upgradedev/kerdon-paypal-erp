@@ -55,7 +55,7 @@ def run_paypal_commerce_agent_workflow(
     actor: kd.Actor,
     pp_plugin: PayPalConnectorPlugin,
     goal: str,
-    public_origin: str = "https://dshvkidt3tkge.cloudfront.net",
+    public_origin: str = "https://d175u4e48xuu3p.cloudfront.net",
     require_live: bool = False,
     llm_mode: str | None = None,
     model_id: str = DEFAULT_MODEL_ID,
