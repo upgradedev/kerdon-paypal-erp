@@ -3,11 +3,14 @@ import json
 import unittest
 from kerdon_aws import MultiTenantStore, dispatch_http_event, lambda_reader
 from kerdon_aws.workspace_routes import workspace_response
-from kerdon import Actor, Role, PermissionDeniedError
+from kerdon import Actor, Role, PermissionDeniedError, reset_connector_states
+from kerdon.erp_services import reset_erp_extensions
 
 
 class WorkspaceHttpTests(unittest.TestCase):
     def setUp(self):
+        reset_erp_extensions()
+        reset_connector_states()
         self.store=MultiTenantStore()
         self.tid=self.store.workspace.default_tenant_id
         self.state=self.store.get_tenant_state(self.tid)
