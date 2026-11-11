@@ -5,6 +5,8 @@
 
 **Live PayPal Developer Platform (`api-m.sandbox.paypal.com`) + Strands Agents SDK (`@tool`) + Deterministic Double-Entry General Ledger**
 
+**Kerdon turns PayPal checkouts, subscriptions, disputes, and bills into a balanced double-entry ledger, seller commissions, and Four-Eyes governed payouts.**
+
 Kerdon PayPal Edition turns multi-store SMB and financial back-office operations into a governed Agentic Commerce loop. Instead of letting an LLM guess balances or trigger unchecked payouts, Kerdon pairs a **6-tool Strands Agents SDK + Amazon Bedrock Nova Pro copilot** (`src/kerdon_aws/paypal_agent_tools.py`) with a **zero-SDK deterministic integer-cent System of Record** (`src/kerdon/`) and **8 live PayPal Developer Platform capabilities** (`src/kerdon_aws/paypal_live_client.py`).
 
 > **Core Problem & Named Persona (`Sofia Marinou`, FinOps Director):** Multi-store merchants and financial back-offices lose margin and audit integrity across disconnected PayPal checkouts, unbooked payment processing fees, chargeback disputes, seller commission clawbacks, and manual batch disbursements. Sofia Marinou uses Kerdon to create live PayPal `Orders v2`, reconcile `seller_receivable_breakdown` fees into balanced 3-line General Ledger entries (`1000_CASH + 6200_OPEX = 1100_AR`), provision recurring SaaS `Subscriptions v1`, assemble SHA-256 `Disputes v1` evidence packets, link verified merchant identities via `Log in with PayPal` (OIDC v1.1), and enforce Four-Eyes Segregation of Duties on `Batch Payouts v1`.

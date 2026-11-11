@@ -1,5 +1,7 @@
 # High-Level Design (HLD): Kerdon PayPal Edition
 
+**Kerdon turns PayPal checkouts, subscriptions, disputes, and bills into a balanced double-entry ledger, seller commissions, and Four-Eyes governed payouts.**
+
 ## 1. Architectural Principles
 
 1. **Deterministic Ledger Authority (`Gate A5`):** `src/kerdon/` owns all accounting, tax, commission, and treasury math in integer cents and imports zero network, clock, cloud, or LLM libraries.

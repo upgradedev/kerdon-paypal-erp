@@ -15,8 +15,8 @@ import kerdon as kd  # noqa: E402
 import kerdon_aws as kaws  # noqa: E402
 
 J5_SENTENCE = (
-    "Kerdon MSP turns client emails and bills into a balanced double-entry ledger, "
-    "seller commissions, auto-drafted fixes, and invalidated stale payouts on AWS."
+    "Kerdon turns PayPal checkouts, subscriptions, disputes, and bills into a balanced "
+    "double-entry ledger, seller commissions, and Four-Eyes governed payouts."
 )
 
 

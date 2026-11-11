@@ -1,6 +1,6 @@
 # Go-To-Market (GTM) & AWS Marketplace SaaS Playbook: Kerdon MSP
 
-**Kerdon MSP turns client emails and bills into a balanced double-entry ledger, seller commissions, auto-drafted fixes, and invalidated stale payouts on AWS.**
+**Kerdon turns PayPal checkouts, subscriptions, disputes, and bills into a balanced double-entry ledger, seller commissions, and Four-Eyes governed payouts.**
 
 ---
 

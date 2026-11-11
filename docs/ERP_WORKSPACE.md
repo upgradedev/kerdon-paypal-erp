@@ -1,6 +1,6 @@
 # ERP Operations Workspace, Pluggable Connectors & Production Hardening Reference
 
-**Kerdon MSP turns client emails and bills into a balanced double-entry ledger, seller commissions, auto-drafted fixes, and invalidated stale payouts on AWS.**
+**Kerdon turns PayPal checkouts, subscriptions, disputes, and bills into a balanced double-entry ledger, seller commissions, and Four-Eyes governed payouts.**
 
 Built for **Sofia Marinou, FinOps and Multi-Tenant Back-Office Director at a 35-client AWS Managed Service Provider (MSP)**, the canonical CloudFront root `/` React 18 + TypeScript + Vite + Tailwind SPA exposes all 18 operational modules, JWT-bound `/erp/*` routing, pluggable payment and statutory tax connectors, and the Go-To-Market (GTM) & AWS Marketplace SaaS Launchpad on `main`.
 

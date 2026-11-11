@@ -4,7 +4,7 @@
 **Kerdon: Autonomous Agentic Commerce & Governed Double-Entry Mini-ERP on PayPal**
 
 ## Tagline
-Strands `@tool` AI agents + live PayPal Orders v2, Subscriptions v1, Payouts v1, Disputes v1 & OIDC wired to a deterministic 3-line General Ledger and Four-Eyes Treasury.
+Kerdon turns PayPal checkouts, subscriptions, disputes, and bills into a balanced double-entry ledger, seller commissions, and Four-Eyes governed payouts.
 
 ## Inspiration
 Small and multi-store merchants lose hours and margin every month reconciling PayPal checkouts, unbooked payment processing fees, customer disputes, seller commission clawbacks, and manual payouts. Financial Ops Director **Sofia Marinou** needed an AI commerce copilot that executes real PayPal API workflows without ever hallucinating a cent in the General Ledger or bypassing payout approvals.

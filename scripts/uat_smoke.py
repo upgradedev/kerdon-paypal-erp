@@ -122,7 +122,7 @@ def run_uat_against_base(base_url: str, expected_sha: str | None = None) -> int:
     check(st_ui == 200, "GET / cockpit HTML 200")
     check("Sofia Marinou" in txt_ui, "Cockpit names J1 persona Sofia Marinou")
     check(
-        "Kerdon MSP turns client emails and bills into a balanced double-entry ledger, seller commissions, auto-drafted fixes, and invalidated stale payouts on AWS."
+        "Kerdon turns PayPal checkouts, subscriptions, disputes, and bills into a balanced double-entry ledger, seller commissions, and Four-Eyes governed payouts."
         in txt_ui,
         "Cockpit contains exact 22-word J5 sentence",
     )
