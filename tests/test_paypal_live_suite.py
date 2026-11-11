@@ -74,7 +74,7 @@ class TestPayPalLiveSuite(unittest.TestCase):
         self.assertEqual(plugin.mode_label, "paypal-sandbox-live")
 
         oidc_start = plugin.build_oidc_authorize_url(
-            redirect_uri="https://dshvkidt3tkge.cloudfront.net/erp/connectors/paypal/oauth/callback",
+            redirect_uri="https://d175u4e48xuu3p.cloudfront.net/erp/connectors/paypal/oauth/callback",
             state_nonce="ppoidc:t1",
         )
         self.assertIn("signin/authorize?", oidc_start["authorize_url"])
@@ -375,7 +375,7 @@ class TestPayPalLiveSuite(unittest.TestCase):
                 return _FakeHttpResponse({"webhooks": []})
             if url.endswith("/v1/notifications/webhooks") and method == "POST":
                 return _FakeHttpResponse(
-                    {"id": "WH-AG-01", "url": "https://dshvkidt3tkge.cloudfront.net/erp/connectors/paypal/webhook"}, status=201
+                    {"id": "WH-AG-01", "url": "https://d175u4e48xuu3p.cloudfront.net/erp/connectors/paypal/webhook"}, status=201
                 )
             if url.endswith("/v1/notifications/verify-webhook-signature"):
                 return _FakeHttpResponse({"verification_status": "SUCCESS"})

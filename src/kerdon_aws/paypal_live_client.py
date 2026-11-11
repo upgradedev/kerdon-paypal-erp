@@ -611,7 +611,7 @@ class PayPalConnectorPlugin(PaymentConnectorPort):
         event_names = [
             "CHECKOUT.ORDER.APPROVED",
             "PAYMENT.CAPTURE.COMPLETED",
-            "PAYMENT.PAYOUTS-BATCH.SUCCESS",
+            "PAYMENT.PAYOUTSBATCH.SUCCESS",
             "CUSTOMER.DISPUTE.CREATED",
             "BILLING.SUBSCRIPTION.ACTIVATED",
         ]

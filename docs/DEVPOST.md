@@ -29,4 +29,8 @@ Kerdon connects **8 live PayPal Developer Platform capabilities** (`https://api-
 - **Multi-Lambda Event-Journal Replay Isolation:** Recording `_replay_provider_receipt` envelopes in DynamoDB ensures cold-start `Reader` Lambdas reconstruct exact PayPal state in memory with zero duplicate external API calls.
 
 ## Accomplishments That We're Proud Of
-- `61/61` unit and mocked-HTTPS tests, `109/109` live UAT contract checks, `10/10` OWASP API Top-10 security controls (`scripts/security_audit.py`), `90/90` ERP benchmark cases, and `0` `axe-core` violations in a 6-stage GitHub Actions CI/CD pipeline.
+- `62/62` unit and mocked-HTTPS tests, `109/109` live UAT contract checks, `10/10` OWASP API Top-10 security controls (`scripts/security_audit.py`), `90/90` ERP benchmark cases, and `0` `axe-core` violations in a 6-stage GitHub Actions CI/CD pipeline.
+
+## Try It Out
+- **Live PayPal Agentic Commerce Console:** https://d175u4e48xuu3p.cloudfront.net/#module=paypal
+- **Public MIT Repository:** https://github.com/upgradedev/kerdon-paypal-erp
