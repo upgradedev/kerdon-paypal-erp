@@ -113,6 +113,16 @@ def journey(page: object, width: int, source: str, shots: Path) -> list[dict[str
     page.locator("#ask-form button.primary").click()  # type: ignore[attr-defined]
     page.locator("#answer details").wait_for(timeout=25000)  # type: ignore[attr-defined]
 
+    # Step 5: Navigate to PayPal Agentic Commerce Hub (#module=paypal) and run axe-core scan
+    page.evaluate("window.location.hash = 'module=paypal'")  # type: ignore[attr-defined]
+    target_sel = (
+        "#paypal-commerce-console"
+        if (LIVE_URL or (ROOT / "src" / "kerdon_aws" / "web_dist").exists())
+        else "#service-data"
+    )
+    page.locator(target_sel).wait_for(timeout=15000)  # type: ignore[attr-defined]
+    violations += run_axe(page, source, f"{width}px paypal hub")
+
     page.evaluate("window.location.hash = 'module=dashboard'")  # type: ignore[attr-defined]
     page.screenshot(path=str(shots / f"erp-{width}.png"), full_page=True)  # type: ignore[attr-defined]
 

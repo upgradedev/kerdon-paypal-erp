@@ -99,6 +99,10 @@ async def main():
   for name in ['Accounting','Treasury','Close & completeness','Commissions','Inventory','Documents & evidence','Workforce','Subscription & fleet']:
    await page.get_by_role('link',name=name,exact=True).click()
    await page.wait_for_timeout(150)
+   if name=='Documents & evidence':
+    await page.locator('#paypal-commerce-console').wait_for(timeout=15000)
+    await page.locator('#paypal-verify-btn').click()
+    await check_axe(page,axe_js,'1280px-paypal-hub')
    if name=='Subscription & fleet':
     await page.locator('#gtm-readiness-btn').click()
     await page.get_by_text('GTM Readiness Pillar',exact=True).wait_for(timeout=15000)

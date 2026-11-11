@@ -92,7 +92,7 @@ def _extract_public_origin(event: dict[str, Any] | None) -> str:
         proto = (hdrs.get("x-forwarded-proto") or "https").split(",")[0].strip()
         if host and "execute-api" not in host:
             return f"{proto}://{host}".rstrip("/")
-    return os.environ.get("KERDON_PUBLIC_ORIGIN", "https://d175u4e48xuu3p.cloudfront.net").rstrip("/")
+    return os.environ.get("KERDON_PUBLIC_ORIGIN", "https://dshvkidt3tkge.cloudfront.net").rstrip("/")
 
 
 class AadeMyDataConnectorPlugin(TaxAuthorityConnectorPort):
@@ -576,14 +576,27 @@ def handle_post_connectors(
             expected_email = approval.recipient_account.strip().lower()
             if not expected_email:
                 sup = state.crm.suppliers.get(approval.counterparty_id)
-                if sup and sup.email:
-                    expected_email = sup.email.strip().lower()
+                sup_email = str(getattr(sup, "email", "") or "").strip().lower() if sup else ""
+                if sup_email:
+                    expected_email = sup_email
             resolved_email = (recipient_email or expected_email or "seller-payout-sb@kerdon-synth.eu").strip()
             if expected_email and "@" in expected_email and resolved_email.lower() != expected_email:
                 raise ValidationError(
                     f"Beneficiary mismatch: payout recipient '{resolved_email}' does not match bound beneficiary '{expected_email}'"
                 )
+            elif not expected_email and approval.counterparty_id not in state.crm.suppliers:
+                allowed_domains = ("@kerdon-synth.eu", "@aegean-mobility.gr", "@kerdon.ai", "@paypal.com")
+                if not any(resolved_email.lower().endswith(d) for d in allowed_domains):
+                    raise ValidationError(
+                        f"Unverified recipient_email '{resolved_email}' is not registered in tenant payroll/commission beneficiary directory"
+                    )
             now_val = int(body.get("now_epoch", 1761950500))
+            state.treasury.validate_payout_preflight(
+                approval_id=approval_id,
+                now_epoch=now_val,
+                executor_id=executor_id,
+                recipient_account=resolved_email,
+            )
             sender_batch_id = kd.compute_idempotency_key(
                 tenant_id=tid,
                 counterparty_id=approval.counterparty_id,

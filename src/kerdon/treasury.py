@@ -231,7 +231,7 @@ class TreasuryEngine:
                 invalidated_ids.append(approval.approval_id)
         return tuple(sorted(invalidated_ids))
 
-    def execute_payout(
+    def validate_payout_preflight(
         self,
         *,
         approval_id: str,
@@ -240,8 +240,8 @@ class TreasuryEngine:
         fx_quote: FxQuote | None = None,
         executor_id: str | None = None,
         recipient_account: str | None = None,
-    ) -> PayoutExecutionReceipt:
-        """Execute a governed payout after verifying approval freshness, Four-Eyes, beneficiary, FX, idempotency, and floor."""
+    ) -> tuple[PayoutApproval, CurrencyPocket, str, int, str, str]:
+        """Validate freshness, Four-Eyes, beneficiary, FX, 7-day idempotency, and reserve floor without mutating state."""
         approval = self.approvals.get(approval_id)
         if approval is None:
             raise KeyError(f"Unknown approval_id: {approval_id}")
@@ -313,8 +313,28 @@ class TreasuryEngine:
                 f"Payout of {debit_cents}c in {debit_ccy} would leave {projected_balance}c, "
                 f"breaching reserve floor {pocket.reserve_floor_cents}c"
             )
+        return approval, pocket, debit_ccy, debit_cents, idem_key, rolling_key
 
-        pocket.balance_cents = projected_balance
+    def execute_payout(
+        self,
+        *,
+        approval_id: str,
+        now_epoch: int,
+        funding_currency: str | None = None,
+        fx_quote: FxQuote | None = None,
+        executor_id: str | None = None,
+        recipient_account: str | None = None,
+    ) -> PayoutExecutionReceipt:
+        """Execute a governed payout after verifying approval freshness, Four-Eyes, beneficiary, FX, idempotency, and floor."""
+        approval, pocket, debit_ccy, debit_cents, idem_key, rolling_key = self.validate_payout_preflight(
+            approval_id=approval_id,
+            now_epoch=now_epoch,
+            funding_currency=funding_currency,
+            fx_quote=fx_quote,
+            executor_id=executor_id,
+            recipient_account=recipient_account,
+        )
+        pocket.balance_cents = pocket.balance_cents - debit_cents
         approval.state = ApprovalState.EXECUTED
         payout_id = f"pay-{approval.approval_id}"
         receipt = PayoutExecutionReceipt(

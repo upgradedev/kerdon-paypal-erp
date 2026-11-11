@@ -74,7 +74,7 @@ class TestPayPalLiveSuite(unittest.TestCase):
         self.assertEqual(plugin.mode_label, "paypal-sandbox-live")
 
         oidc_start = plugin.build_oidc_authorize_url(
-            redirect_uri="https://d175u4e48xuu3p.cloudfront.net/erp/connectors/paypal/oauth/callback",
+            redirect_uri="https://dshvkidt3tkge.cloudfront.net/erp/connectors/paypal/oauth/callback",
             state_nonce="ppoidc:t1",
         )
         self.assertIn("signin/authorize?", oidc_start["authorize_url"])
@@ -375,7 +375,7 @@ class TestPayPalLiveSuite(unittest.TestCase):
                 return _FakeHttpResponse({"webhooks": []})
             if url.endswith("/v1/notifications/webhooks") and method == "POST":
                 return _FakeHttpResponse(
-                    {"id": "WH-AG-01", "url": "https://d175u4e48xuu3p.cloudfront.net/erp/connectors/paypal/webhook"}, status=201
+                    {"id": "WH-AG-01", "url": "https://dshvkidt3tkge.cloudfront.net/erp/connectors/paypal/webhook"}, status=201
                 )
             if url.endswith("/v1/notifications/verify-webhook-signature"):
                 return _FakeHttpResponse({"verification_status": "SUCCESS"})
@@ -580,6 +580,65 @@ class TestPayPalLiveSuite(unittest.TestCase):
             200,
         )
         self.assertEqual(r_state.treasury.approvals["apr-pp-agent-1"].state.value, "EXECUTED")
+
+    def test_stale_invalidated_approval_blocks_live_payout_before_wire_call(self) -> None:
+        calls: list[tuple[str, str]] = []
+
+        def _should_not_be_called(req: Any, timeout: float = 15.0) -> Any:
+            calls.append((req.get_method(), req.full_url))
+            raise AssertionError("External PayPal wire must never be called when approval is INVALIDATED")
+
+        def _call(path: str, payload: dict) -> dict:
+            return kaws.lambda_writer(
+                {
+                    "rawPath": path,
+                    "requestContext": {"http": {"method": "POST", "path": path}},
+                    "body": json.dumps(payload),
+                },
+                store=self.store,
+            )
+
+        with patch("urllib.request.urlopen", side_effect=_should_not_be_called), patch.dict(
+            "os.environ",
+            {
+                "PAYPAL_CLIENT_ID": "sb-client-id",
+                "PAYPAL_CLIENT_SECRET": "sb-client-secret",
+            },
+            clear=False,
+        ):
+            r_cn = _call(
+                f"/tenants/{self.tid}/credit-notes",
+                {
+                    "credit_note_id": "cn-pp-test-01",
+                    "counterparty_id": "sup-aegean-mobility-01",
+                    "net_cents": 25_000,
+                    "vat_cents": 6_000,
+                    "gross_cents": 31_000,
+                    "referenced_invoice_id": "doc-aegean-mobility-pur-201",
+                },
+            )
+            self.assertIn(r_cn["statusCode"], (200, 201))
+            r_stale = _call(
+                "/erp/connectors/paypal/payout",
+                {
+                    "approval_id": "apr-aegean-mobility-sup-201",
+                    "executor_id": "act-nikos-alexiou",
+                    "recipient_email": "ap@alpine-cloud-synth.eu",
+                },
+            )
+            self.assertEqual(r_stale["statusCode"], 409)
+            self.assertEqual(len(calls), 0)
+
+            r_bad_domain = _call(
+                "/erp/connectors/paypal/payout",
+                {
+                    "approval_id": "apr-aegean-mobility-comm-oct",
+                    "executor_id": "act-nikos-alexiou",
+                    "recipient_email": "attacker@untrusted-external.org",
+                },
+            )
+            self.assertEqual(r_bad_domain["statusCode"], 400)
+            self.assertEqual(len(calls), 0)
 
 
 if __name__ == "__main__":

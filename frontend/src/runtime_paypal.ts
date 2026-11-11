@@ -84,8 +84,8 @@ export function renderPayPalCommerceSection(ctx: any): string {
       : '') +
     '<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:14px">' +
     '<strong>Strands Agents SDK + Amazon Bedrock PayPal Copilot (6 Executable @tool Functions)</strong>' +
-    '<div class="toolbar" style="margin-top:8px;gap:8px">' +
-    '<input id="paypal-agent-input" aria-label="PayPal AI Agent goal" style="flex:1;min-width:240px" value="Inspect Sandbox status, create a live Checkout Order v2 for the next unpaid invoice, provision a SaaS Subscription Plan v1, and diagnose Treasury Payouts">' +
+    '<div class="toolbar" style="margin-top:8px;gap:8px;flex-wrap:wrap">' +
+    '<input id="paypal-agent-input" aria-label="PayPal AI Agent goal" style="flex:1;min-width:150px;max-width:100%" value="Inspect Sandbox status, create a live Checkout Order v2 for the next unpaid invoice, provision a SaaS Subscription Plan v1, and diagnose Treasury Payouts">' +
     '<button type="button" id="paypal-agent-run-btn" class="primary">Run PayPal Strands Agent</button>' +
     '</div>' +
     agentBox +
