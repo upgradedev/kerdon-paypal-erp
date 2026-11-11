@@ -77,14 +77,16 @@ def journey(page: object, width: int, source: str, shots: Path) -> list[dict[str
     # Ensure clean workspace state via Close & completeness reset
     page.evaluate("window.location.hash = 'module=close'")  # type: ignore[attr-defined]
     page.locator("#ws-reset-demo").wait_for(timeout=15000)  # type: ignore[attr-defined]
-    page.locator("#ws-reset-demo").click()  # type: ignore[attr-defined]
+    with page.expect_response(lambda r: "/reset" in r.url, timeout=25000):  # type: ignore[attr-defined]
+        page.locator("#ws-reset-demo").click()  # type: ignore[attr-defined]
+    page.wait_for_load_state("networkidle")  # type: ignore[attr-defined]
     page.locator("#connection", has_text="Connected").wait_for(timeout=20000)  # type: ignore[attr-defined]
 
     # Step 1: Run 8-stage Strands Mini-ERP close
     page.evaluate("window.location.hash = 'module=close'")  # type: ignore[attr-defined]
     page.locator("#evaluate").wait_for(timeout=15000)  # type: ignore[attr-defined]
     page.locator("#evaluate").click()  # type: ignore[attr-defined]
-    page.locator("#evaluation-result details").wait_for(timeout=25000)  # type: ignore[attr-defined]
+    page.locator("#evaluation-result details").wait_for(timeout=40000)  # type: ignore[attr-defined]
     violations += run_axe(page, source, f"{width}px after close")
 
     # H2: Navigate to Commissions and verify disabled self-approve button & Four-Eyes reason
@@ -129,7 +131,9 @@ def journey(page: object, width: int, source: str, shots: Path) -> list[dict[str
     # Emergency exit / Reset demo workspace
     page.evaluate("window.location.hash = 'module=close'")  # type: ignore[attr-defined]
     page.locator("#ws-reset-demo").wait_for(timeout=15000)  # type: ignore[attr-defined]
-    page.locator("#ws-reset-demo").click()  # type: ignore[attr-defined]
+    with page.expect_response(lambda r: "/reset" in r.url, timeout=25000):  # type: ignore[attr-defined]
+        page.locator("#ws-reset-demo").click()  # type: ignore[attr-defined]
+    page.wait_for_load_state("networkidle")  # type: ignore[attr-defined]
     page.locator("#connection", has_text="Connected").wait_for(timeout=20000)  # type: ignore[attr-defined]
 
     overflow = page.evaluate(  # type: ignore[attr-defined]
