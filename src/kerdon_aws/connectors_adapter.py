@@ -92,7 +92,7 @@ def _extract_public_origin(event: dict[str, Any] | None) -> str:
         proto = (hdrs.get("x-forwarded-proto") or "https").split(",")[0].strip()
         if host and "execute-api" not in host:
             return f"{proto}://{host}".rstrip("/")
-    return os.environ.get("KERDON_PUBLIC_ORIGIN", "https://dshvkidt3tkge.cloudfront.net").rstrip("/")
+    return os.environ.get("KERDON_PUBLIC_ORIGIN", "https://d175u4e48xuu3p.cloudfront.net").rstrip("/")
 
 
 class AadeMyDataConnectorPlugin(TaxAuthorityConnectorPort):
