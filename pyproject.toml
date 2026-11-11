@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kerdon-msp"
+version = "0.3.0"
+description = "Kerdon MSP: Autonomous Mini-ERP and Financial Back-Office on AWS"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.coverage.run]
+source = ["src/kerdon", "src/kerdon_aws"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true

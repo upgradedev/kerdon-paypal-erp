@@ -1,0 +1,118 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CloudFormationStack",
+      "Effect": "Allow",
+      "Action": "cloudformation:*",
+      "Resource": [
+        "arn:aws:cloudformation:eu-west-1:308857099262:stack/kerdon-paypal*/*",
+        "arn:aws:cloudformation:eu-west-1:308857099262:stack/aws-sam-cli-managed-default*",
+        "arn:aws:cloudformation:eu-west-1:aws:transform/Serverless-2016-10-31"
+      ]
+    },
+    {
+      "Sid": "ValidateAndIdentity",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:ValidateTemplate",
+        "sts:GetCallerIdentity"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "SamAndEvidenceBuckets",
+      "Effect": "Allow",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::aws-sam-cli-managed-default*",
+        "arn:aws:s3:::aws-sam-cli-managed-default*/*",
+        "arn:aws:s3:::kerdon-paypal-*",
+        "arn:aws:s3:::kerdon-paypal-*/*"
+      ]
+    },
+    {
+      "Sid": "StackNamedResources",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:*",
+        "dynamodb:*",
+        "states:*",
+        "logs:*"
+      ],
+      "Resource": [
+        "arn:aws:lambda:eu-west-1:308857099262:function:kerdon-paypal-*",
+        "arn:aws:dynamodb:eu-west-1:308857099262:table/kerdon-paypal-*",
+        "arn:aws:states:eu-west-1:308857099262:stateMachine:kerdon-paypal-*",
+        "arn:aws:states:eu-west-1:308857099262:execution:kerdon-paypal-*:*",
+        "arn:aws:logs:eu-west-1:308857099262:log-group:/aws/lambda/kerdon-paypal-*",
+        "arn:aws:logs:eu-west-1:308857099262:log-group:/aws/lambda/kerdon-paypal-*:*"
+      ]
+    },
+    {
+      "Sid": "StackCreatesAndApi",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:CreateFunction",
+        "lambda:ListFunctions",
+        "lambda:GetAccountSettings",
+        "dynamodb:CreateTable",
+        "dynamodb:ListTables",
+        "dynamodb:DescribeLimits",
+        "apigateway:*",
+        "states:CreateStateMachine",
+        "states:ListStateMachines",
+        "logs:CreateLogGroup",
+        "logs:DescribeLogGroups",
+        "logs:ListTagsForResource",
+        "cloudfront:*",
+        "bedrock-agentcore:CreateMemory",
+        "bedrock-agentcore:GetMemory",
+        "bedrock-agentcore:UpdateMemory",
+        "bedrock-agentcore:DeleteMemory",
+        "bedrock-agentcore:ListMemories",
+        "bedrock-agentcore:UpdateMemoryRecordExpirySpecification",
+        "bedrock-agentcore:TagResource",
+        "bedrock-agentcore:UntagResource",
+        "bedrock-agentcore:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "StackRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:GetRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:UpdateRole",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::308857099262:role/kerdon-paypal-*"
+    },
+    {
+      "Sid": "PassStackRoles",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::308857099262:role/kerdon-paypal-*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": [
+            "lambda.amazonaws.com",
+            "states.amazonaws.com",
+            "bedrock-agentcore.amazonaws.com"
+          ]
+        }
+      }
+    }
+  ]
+}

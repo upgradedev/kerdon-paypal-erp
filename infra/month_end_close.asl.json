@@ -1,0 +1,42 @@
+{
+  "Comment": "Kerdon MSP Autonomous Month-End Close State Machine with Managed Retry & Dead-Letter Fallback",
+  "StartAt": "RunEightStageMonthEndClose",
+  "States": {
+    "RunEightStageMonthEndClose": {
+      "Type": "Task",
+      "Resource": "${WriterFunctionArn}",
+      "Parameters": {
+        "action": "month_end_close",
+        "tenant_id.$": "$.tenant_id",
+        "period.$": "$.period"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException",
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.close_error",
+          "Next": "MonthEndCloseQuarantined"
+        }
+      ],
+      "End": true
+    },
+    "MonthEndCloseQuarantined": {
+      "Type": "Fail",
+      "Error": "MonthEndCloseQuarantinedError",
+      "Cause": "Month-end close task failed after managed retries and was quarantined for FinOps controller review"
+    }
+  }
+}

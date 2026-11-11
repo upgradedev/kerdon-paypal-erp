@@ -1,0 +1,984 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Kerdon MSP Autonomous Mini-ERP and Financial Back-Office isolated stack
+  (kerdon-paypal-dev in eu-west-1). Enforces StackPrefix AllowedPattern isolation
+  and Least-Privilege Reader, Evaluator, and Writer IAM separation.
+
+Parameters:
+  StackPrefix:
+    Type: String
+    Default: kerdon-paypal
+    AllowedPattern: "^kerdon-paypal(-[a-z0-9]+)?$"
+    Description: Isolation guard. Only kerdon-paypal stack prefixes are accepted.
+  DeployedSha:
+    Type: String
+    Default: unset
+    Description: Git commit SHA served at /DEPLOYED_SHA and /health.
+  AgentCoreMemoryId:
+    Type: String
+    Default: ""
+    Description: Amazon Bedrock AgentCore Memory identifier for multi-tenant audit trails.
+  BedrockModelId:
+    Type: String
+    Default: "eu.amazon.nova-pro-v1:0"
+    Description: Amazon Bedrock inference profile or foundation model ID.
+  AuthMode:
+    Type: String
+    Default: "demo"
+    AllowedValues: ["demo", "strict"]
+    Description: Identity verification mode (demo allows test headers; strict enforces verified JWT fail-closed).
+  AwsMarketplaceProductCode:
+    Type: String
+    Default: ""
+    Description: Optional AWS Marketplace SaaS ProductCode for ResolveCustomer and BatchMeterUsage.
+  PayPalClientId:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: PayPal Developer Sandbox REST/OIDC Client ID.
+  PayPalClientSecret:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: PayPal Developer Sandbox REST/OIDC Client Secret.
+  PayPalBaseUrl:
+    Type: String
+    Default: "https://api-m.sandbox.paypal.com"
+    Description: PayPal REST API base endpoint.
+
+Conditions:
+  HasExplicitMemoryId: !Not [!Equals [!Ref AgentCoreMemoryId, ""]]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 256
+    Tracing: Active
+    Architectures: [arm64]
+    Environment:
+      Variables:
+        DEPLOYED_SHA: !Ref DeployedSha
+        STACK_PREFIX: !Ref StackPrefix
+        KERDON_APP_TABLE: !Ref KerdonAppTable
+        KERDON_APPROVALS_TABLE: !Ref KerdonApprovalsTable
+        KERDON_LLM_MODE: bedrock
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+        AGENTCORE_MEMORY_ID: !If [HasExplicitMemoryId, !Ref AgentCoreMemoryId, !GetAtt AgentCoreMemory.MemoryId]
+        KERDON_AUTH_MODE: !Ref AuthMode
+        KERDON_WEB_BUCKET: !Ref WebAssetsBucket
+        AWS_MARKETPLACE_PRODUCT_CODE: !Ref AwsMarketplaceProductCode
+        PAYPAL_CLIENT_ID: !Ref PayPalClientId
+        PAYPAL_CLIENT_SECRET: !Ref PayPalClientSecret
+        PAYPAL_BASE_URL: !Ref PayPalBaseUrl
+
+Resources:
+  KerdonApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: Prod
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 100
+        ThrottlingRateLimit: 50
+
+  KerdonAppTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${StackPrefix}-app"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  KerdonApprovalsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${StackPrefix}-approvals"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  EvidenceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${StackPrefix}-evidence-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireDemoEvidence14Days
+            Status: Enabled
+            ExpirationInDays: 14
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  WebAssetsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${StackPrefix}-web-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  WebOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${StackPrefix}-web-oac-${AWS::AccountId}-${AWS::Region}"
+        Description: "Origin Access Control for Kerdon MSP React+Vite+Tailwind S3 SPA"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  SpaRewriteFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "${StackPrefix}-spa-rewrite-${AWS::Region}"
+      AutoPublish: true
+      FunctionConfig:
+        Comment: "Canonicalize legacy /workspace and /cockpit to / (301) and rewrite extensionless SPA paths to /index.html"
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var uri = request.uri || '/';
+          if (uri === '/workspace' || uri === '/workspace/' || uri === '/cockpit' || uri === '/cockpit/') {
+            return {
+              statusCode: 301,
+              statusDescription: 'Moved Permanently',
+              headers: {
+                location: { value: '/' },
+                'cache-control': { value: 'public, max-age=3600' }
+              }
+            };
+          }
+          if (uri === '/' || uri.indexOf('.') === -1) {
+            request.uri = '/index.html';
+          }
+          return request;
+        }
+
+  WebCdnDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub "${StackPrefix} Enterprise CloudFront + S3 OAC + API Gateway CDN"
+        Enabled: true
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        DefaultRootObject: index.html
+        Origins:
+          - Id: S3WebOrigin
+            DomainName: !GetAtt WebAssetsBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt WebOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+          - Id: ApiGatewayOrigin
+            DomainName: !Sub "${KerdonApi}.execute-api.${AWS::Region}.amazonaws.com"
+            OriginPath: /Prod
+            CustomOriginConfig:
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
+        DefaultCacheBehavior:
+          TargetOriginId: S3WebOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt SpaRewriteFunction.FunctionARN
+        CacheBehaviors:
+          - PathPattern: "/assets/*"
+            TargetOriginId: S3WebOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          - PathPattern: "/erp/*"
+            TargetOriginId: ApiGatewayOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          - PathPattern: "/tenants*"
+            TargetOriginId: ApiGatewayOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          - PathPattern: "/organizations*"
+            TargetOriginId: ApiGatewayOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          - PathPattern: "/gtm/*"
+            TargetOriginId: ApiGatewayOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          - PathPattern: "/health"
+            TargetOriginId: ApiGatewayOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          - PathPattern: "/DEPLOYED_SHA"
+            TargetOriginId: ApiGatewayOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+
+  AgentCoreMemory:
+    Type: AWS::BedrockAgentCore::Memory
+    Properties:
+      Name: !Join ["_", !Split ["-", !Sub "${StackPrefix}_memory"]]
+      Description: "Kerdon MSP multi-tenant financial audit and compounding close memory"
+      EventExpiryDuration: 90
+      MemoryExecutionRoleArn: !GetAtt AgentCoreRuntimeRole.Arn
+
+  WebAssetsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebAssetsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipalReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${WebAssetsBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${WebCdnDistribution}" 
+
+  AgentCoreRuntimeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${StackPrefix}-agentcore-runtime"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: kerdon-bedrock-invoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - "arn:aws:bedrock:*::foundation-model/*"
+                  - "arn:aws:bedrock:*:*:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  ReaderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${StackPrefix}-reader"
+      ReservedConcurrentExecutions: 10
+      CodeUri: ../src/
+      Handler: kerdon_aws.handlers.lambda_reader
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref KerdonAppTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref KerdonApprovalsTable
+        - S3ReadPolicy:
+            BucketName: !Ref WebAssetsBucket
+      Events:
+        WebAssetsGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /assets/{proxy+}
+            Method: GET
+        WebAssetsHead:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /assets/{proxy+}
+            Method: HEAD
+        WorkspaceGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /workspace
+            Method: GET
+        WorkspaceHead:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /workspace
+            Method: HEAD
+        TenantOperationsGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/operations
+            Method: GET
+        RootGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /
+            Method: GET
+        RootHead:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /
+            Method: HEAD
+        CockpitGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /cockpit
+            Method: GET
+        CockpitHead:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /cockpit
+            Method: HEAD
+        HealthGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /health
+            Method: GET
+        DeployedShaGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /DEPLOYED_SHA
+            Method: GET
+        TenantsGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants
+            Method: GET
+        TenantOverviewGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/overview
+            Method: GET
+        TenantLedgerGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/ledger
+            Method: GET
+        TenantCommissionsGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/commissions
+            Method: GET
+        TenantCompletenessGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/completeness
+            Method: GET
+        TenantBoardPackGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/board-pack
+            Method: GET
+        TenantTreasuryGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/treasury
+            Method: GET
+        DocumentLinkGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/documents/{doc_id}/link
+            Method: GET
+        GtmPricingGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /gtm/pricing
+            Method: GET
+        GtmReadinessGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /gtm/readiness
+            Method: GET
+        TenantGtmReadinessGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/gtm/readiness
+            Method: GET
+        TenantFullStateGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/full-state
+            Method: GET
+        RootHead:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /
+            Method: HEAD
+        HealthHead:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /health
+            Method: HEAD
+        TenantExportCsvGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/export/journal-csv
+            Method: GET
+        TenantDraftPdfGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/docgen/{draft_id}/pdf
+            Method: GET
+        TenantSellerStatementGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/commissions/seller-statement
+            Method: GET
+        TenantEvidenceBundleGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/evidence-bundle
+            Method: GET
+        TenantInventoryGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/inventory
+            Method: GET
+        TenantConnectorsGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/connectors
+            Method: GET
+        OrganizationsGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /organizations
+            Method: GET
+        ErpProxyGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /erp/{proxy+}
+            Method: GET
+
+  EvaluatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${StackPrefix}-evaluator"
+      ReservedConcurrentExecutions: 5
+      CodeUri: ../src/
+      Handler: kerdon_aws.handlers.lambda_evaluator
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref KerdonAppTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - "arn:aws:bedrock:*::foundation-model/*"
+                - "arn:aws:bedrock:*:*:inference-profile/*"
+            - Effect: Allow
+              Action:
+                - bedrock-agentcore:CreateEvent
+                - bedrock-agentcore:ListEvents
+                - bedrock-agentcore:GetEvent
+                - bedrock-agentcore:GetMemory
+              Resource: !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:memory/*"
+      Events:
+        EvaluateTenant:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/evaluate
+            Method: POST
+        ExtractTenantDocumentPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/ai/extract-document
+            Method: POST
+        ErpExtractDocumentPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /erp/ai/extract-document
+            Method: POST
+        QueryTenant:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/query
+            Method: POST
+        SimulateCommission:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/commissions/simulate
+            Method: POST
+        PlanDiffCommission:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/commissions/plan-diff
+            Method: POST
+        StrandsGateVerify:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/strands-gate/verify
+            Method: POST
+        ErpEvaluatePost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /erp/evaluate
+            Method: POST
+        ErpQueryPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /erp/query
+            Method: POST
+        ErpSimulateCommissionPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /erp/commissions/simulate
+            Method: POST
+        ErpPlanDiffCommissionPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /erp/commissions/plan-diff
+            Method: POST
+        ErpStrandsGateVerifyPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /erp/strands-gate/verify
+            Method: POST
+
+  WriterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${StackPrefix}-writer"
+      ReservedConcurrentExecutions: 10
+      Environment:
+        Variables:
+          EVIDENCE_BUCKET: !Ref EvidenceBucket
+      CodeUri: ../src/
+      Handler: kerdon_aws.handlers.lambda_writer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref KerdonAppTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref KerdonApprovalsTable
+        - S3CrudPolicy:
+            BucketName: !Ref EvidenceBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - "arn:aws:bedrock:*::foundation-model/*"
+                - "arn:aws:bedrock:*:*:inference-profile/*"
+            - Effect: Allow
+              Action:
+                - bedrock-agentcore:CreateEvent
+                - bedrock-agentcore:ListEvents
+                - bedrock-agentcore:GetMemory
+              Resource: !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:memory/*"
+            - Effect: Allow
+              Action:
+                - aws-marketplace:ResolveCustomer
+                - aws-marketplace:BatchMeterUsage
+              Resource: "*"
+      Events:
+        OnboardTenant:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/onboard
+            Method: POST
+        IngestEmail:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/ingest/email
+            Method: POST
+        RegisterCreditNote:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/credit-notes
+            Method: POST
+        ApproveCommissions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/commissions/approve
+            Method: POST
+        CreateTreasuryApproval:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/treasury/approvals
+            Method: POST
+        ExecuteTreasuryPayout:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/treasury/execute
+            Method: POST
+        ResetTenant:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/reset
+            Method: POST
+        IssueInvoice:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/invoices
+            Method: POST
+        CreateBooking:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/bookings
+            Method: POST
+        LearnMemory:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/memory/learn
+            Method: POST
+        SendDraft:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/docgen/{draft_id}/send
+            Method: POST
+        SellerDisputePost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/commissions/dispute
+            Method: POST
+        SupersedeSettlementPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/commissions/supersede
+            Method: POST
+        ClassifyRemittancePost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/remittances/classify
+            Method: POST
+        AttestRemittancePost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/remittances/attest
+            Method: POST
+        DisputeHoldPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/disputes/hold
+            Method: POST
+        PortfolioModePost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/portfolio/mode
+            Method: POST
+        InvitesPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/invites
+            Method: POST
+        SubscriptionPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/billing/subscription
+            Method: POST
+        InventoryMovementPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/inventory/movement
+            Method: POST
+        PartiesPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/parties
+            Method: POST
+        DraftsPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/drafts
+            Method: POST
+        ExpensesPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/expenses
+            Method: POST
+        ReverseInvoicePost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/invoices/{doc_id}/reverse
+            Method: POST
+        ReceiptsPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/receipts
+            Method: POST
+        PaymentsPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/payments
+            Method: POST
+        TargetsPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/targets
+            Method: POST
+        SandboxSubmitPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/treasury/sandbox-submit
+            Method: POST
+        SandboxWebhookPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/treasury/webhooks/sandbox
+            Method: POST
+        ConnectorsConfigPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/connectors/config
+            Method: POST
+        ConnectorsVerifyPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/connectors/verify
+            Method: POST
+        TenantOpeningBalancePost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/onboarding/opening-balance
+            Method: POST
+        GtmMarketplaceResolvePost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /gtm/marketplace/resolve-customer
+            Method: POST
+        GtmMarketplaceMeterPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /gtm/marketplace/meter-usage
+            Method: POST
+        PayPalOrderPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/connectors/paypal/order
+            Method: POST
+        PayPalDisputePost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/connectors/paypal/dispute
+            Method: POST
+        PayPalPayoutPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/connectors/paypal/payout
+            Method: POST
+        TenantConnectorsProxyPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/connectors/{proxy+}
+            Method: POST
+        MyDataTransmitPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/connectors/mydata/transmit
+            Method: POST
+        MyDataCancelPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /tenants/{id}/connectors/mydata/cancel
+            Method: POST
+        OrganizationsPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /organizations
+            Method: POST
+        OrganizationsAcceptInvitePost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /organizations/invites/accept
+            Method: POST
+        ErpProxyPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref KerdonApi
+            Path: /erp/{proxy+}
+            Method: POST
+
+  MonthEndCloseStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "${StackPrefix}-month-end-close"
+      DefinitionUri: month_end_close.asl.json
+      DefinitionSubstitutions:
+        EvaluatorFunctionArn: !GetAtt EvaluatorFunction.Arn
+        WriterFunctionArn: !GetAtt WriterFunction.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref EvaluatorFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref WriterFunction
+
+Outputs:
+  ApiUrl:
+    Description: Kerdon MSP HTTP API base URL
+    Value: !Sub "https://${KerdonApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  AppTableName:
+    Value: !Ref KerdonAppTable
+  ApprovalsTableName:
+    Value: !Ref KerdonApprovalsTable
+  EvidenceBucketName:
+    Value: !Ref EvidenceBucket
+  WebAssetsBucketName:
+    Value: !Ref WebAssetsBucket
+  WebCdnDistributionId:
+    Value: !Ref WebCdnDistribution
+  WebAppUrl:
+    Description: Kerdon MSP CloudFront + S3 Enterprise SPA URL (Zero-Lambda Static Edge)
+    Value: !Sub "https://${WebCdnDistribution.DomainName}/" 
+  AgentCoreRuntimeRoleArn:
+    Value: !GetAtt AgentCoreRuntimeRole.Arn
+  AgentCoreMemoryId:
+    Value: !GetAtt AgentCoreMemory.MemoryId
+  AgentCoreMemoryArn:
+    Value: !GetAtt AgentCoreMemory.MemoryArn
+  MonthEndCloseStateMachineArn:
+    Value: !Ref MonthEndCloseStateMachine

@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.aws-sam/
+dist/
+build/
+*.egg-info/
+.env
+temp/
+node_modules/
+frontend/dist/
+src/kerdon_aws/web_dist/

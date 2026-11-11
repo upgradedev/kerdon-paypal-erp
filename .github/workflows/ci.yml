@@ -1,0 +1,254 @@
+name: Kerdon PayPal ERP CI/CD Testing Pyramid, Security Stage & Governed AWS Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_action:
+        description: "AWS stack lifecycle action (deploy | deploy-smoke-teardown | none)"
+        required: false
+        default: "deploy"
+        type: choice
+        options:
+          - deploy
+          - deploy-smoke-teardown
+          - none
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  stage-1-static-gates:
+    name: "Stage 1 (Pyramid Base): Architecture, Clean-Room & Gate Self-Test"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run 10 static readiness gates and 5-fixture mutation self-test
+        run: |
+          python scripts/verify_gates.py
+          python scripts/verify_gates.py --self-test
+
+  stage-2-security-gate:
+    name: "Stage 2 (Security): Bandit SAST, pip-audit SCA, SAM IaC & OWASP Top-10"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Bandit SAST and pip-audit SCA scanners
+        run: python -m pip install --upgrade pip bandit pip-audit
+      - name: Run Bandit SAST static security scan on src/
+        run: bandit -r src/ -ll -ii
+      - name: Run pip-audit dependency vulnerability scan on src/requirements.txt
+        run: pip-audit -r src/requirements.txt
+      - name: Run Kerdon SEC-01..SEC-10 Secret, AST, SAM IaC & OWASP API Top-10 Audit
+        env:
+          PYTHONPATH: src
+        run: python scripts/security_audit.py
+
+  stage-3-unit-benchmark-pyramid:
+    name: "Stage 3 (Unit & Benchmark Pyramid): 59 Unit Tests, 90-Case Benchmark & Coverage >=85%"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install coverage tool
+        run: python -m pip install --upgrade pip coverage
+      - name: Run 90-case deterministic Mini-ERP benchmark (100% accuracy gate)
+        run: python scripts/run_erp_benchmark.py
+      - name: Run unit, hexagonal port-swap, boundary, and superset tests with >=85% coverage
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m coverage run -m unittest discover -s tests -v
+          python -m coverage report --fail-under=85
+
+  stage-4-integration-api-uat:
+    name: "Stage 4 (Integration Pyramid): 108-Check HTTP API v2 Contract & Adversarial UAT"
+    needs: [stage-1-static-gates, stage-2-security-gate, stage-3-unit-benchmark-pyramid]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run 108-check HTTP API v2 UAT smoke and negative boundary suite
+        env:
+          PYTHONPATH: src
+        run: python scripts/uat_smoke.py
+
+  stage-5-e2e-browser-axe:
+    name: "Stage 5 (E2E & Accessibility Pyramid): React + Vite + Tailwind Build & Playwright + axe-core"
+    needs: [stage-1-static-gates, stage-2-security-gate, stage-3-unit-benchmark-pyramid]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build React 18 + TypeScript + Vite + Tailwind CSS SPA
+        run: |
+          cd frontend
+          npm install
+          npm run build
+          cd ..
+          rm -rf src/kerdon_aws/web_dist
+          cp -r frontend/dist src/kerdon_aws/web_dist
+      - name: Install Playwright and Chromium (CI only)
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Run E2E canonical `/` governance journey and axe-core zero-violations check
+        env:
+          PYTHONPATH: src
+        run: python scripts/browser_qa.py
+      - name: Run E2E `/` 18-module ERP Operations journey in Chromium (React + Vite + Tailwind bundle)
+        env:
+          PYTHONPATH: src
+          KERDON_QA_URL: http://127.0.0.1:8091
+        run: |
+          python scripts/serve_local.py 8091 &
+          SERVER_PID=$!
+          sleep 2
+          python scripts/workspace_browser_qa.py
+          kill $SERVER_PID || true
+      - name: Upload ERP viewport screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: erp-screenshots
+          path: temp/qa-shots/
+          if-no-files-found: ignore
+
+  stage-6-deploy-and-live-verify:
+    name: "Stage 6 (CD & Live Verification): React+Vite+Tailwind S3 Sync, SAM Deploy & Live E2E"
+    needs:
+      - stage-1-static-gates
+      - stage-2-security-gate
+      - stage-3-unit-benchmark-pyramid
+      - stage-4-integration-api-uat
+      - stage-5-e2e-browser-axe
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy_action != 'none')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: aws-actions/setup-sam@v2
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: eu-west-1
+      - name: Build React 18 + TypeScript + Vite + Tailwind CSS SPA
+        run: |
+          cd frontend
+          npm install
+          npm run build
+          cd ..
+          rm -rf src/kerdon_aws/web_dist
+          cp -r frontend/dist src/kerdon_aws/web_dist
+      - name: Build and deploy stack and sync Vite bundle to S3 WebAssetsBucket
+        env:
+          PAYPAL_CID: ${{ secrets.PAYPAL_CLIENT_ID }}
+          PAYPAL_CSEC: ${{ secrets.PAYPAL_CLIENT_SECRET }}
+        run: |
+          if [ "${{ inputs.deploy_action }}" = "deploy-smoke-teardown" ]; then
+            STACK_NAME="kerdon-paypal-eph"
+            STACK_PREFIX="kerdon-paypal-eph"
+          else
+            STACK_NAME="kerdon-paypal-dev"
+            STACK_PREFIX="kerdon-paypal"
+          fi
+          sam build --template-file infra/template.yaml
+          cp infra/month_end_close.asl.json .aws-sam/build/month_end_close.asl.json
+          sam deploy \
+            --template-file .aws-sam/build/template.yaml \
+            --stack-name "$STACK_NAME" \
+            --region eu-west-1 \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+            --resolve-s3 \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides "StackPrefix=${STACK_PREFIX} DeployedSha=${GITHUB_SHA} PayPalClientId=${PAYPAL_CID} PayPalClientSecret=${PAYPAL_CSEC}"
+          WEB_BUCKET=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region eu-west-1 --query "Stacks[0].Outputs[?OutputKey=='WebAssetsBucketName'].OutputValue" --output text)
+          CDN_ID=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region eu-west-1 --query "Stacks[0].Outputs[?OutputKey=='WebCdnDistributionId'].OutputValue" --output text)
+          aws s3 sync frontend/dist/ "s3://${WEB_BUCKET}/" --delete --cache-control "public, max-age=31536000, immutable"
+          aws s3 cp frontend/dist/index.html "s3://${WEB_BUCKET}/index.html" --cache-control "no-cache, no-store, must-revalidate" --content-type "text/html; charset=utf-8"
+          aws cloudfront create-invalidation --distribution-id "$CDN_ID" --paths "/*"
+      - name: Install Playwright and Chromium for Live Browser Verification
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Run live URL readiness check, Step Functions workflow, 111-check live UAT (API + CloudFront), and live E2E Browser QA
+        env:
+          PYTHONPATH: src
+          REQUIRE_PAYPAL_LIVE: "1"
+        run: |
+          if [ "${{ inputs.deploy_action }}" = "deploy-smoke-teardown" ]; then
+            STACK_NAME="kerdon-paypal-eph"
+          else
+            STACK_NAME="kerdon-paypal-dev"
+          fi
+          API_URL=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region eu-west-1 --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
+          WEB_APP_URL=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region eu-west-1 --query "Stacks[0].Outputs[?OutputKey=='WebAppUrl'].OutputValue" --output text)
+          MEM_ID=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region eu-west-1 --query "Stacks[0].Outputs[?OutputKey=='AgentCoreMemoryId'].OutputValue" --output text)
+          SM_ARN=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region eu-west-1 --query "Stacks[0].Outputs[?OutputKey=='MonthEndCloseStateMachineArn'].OutputValue" --output text || true)
+          echo "CloudFront + S3 Enterprise SPA URL: $WEB_APP_URL"
+          echo "Provisioned AgentCoreMemoryId: $MEM_ID"
+          if [ -z "$MEM_ID" ] || [ "$MEM_ID" = "None" ]; then
+            echo "ERROR: AgentCoreMemoryId output is empty!"
+            exit 1
+          fi
+          if [ -n "$SM_ARN" ] && [ "$SM_ARN" != "None" ]; then
+            EXEC_ARN=$(aws stepfunctions start-execution --state-machine-arn "$SM_ARN" --region eu-west-1 --input '{"tenant_id":"tnt-aegean-mobility-cf11dd319a","period":"2026-10"}' --query "executionArn" --output text)
+            echo "Started Step Functions MonthEndCloseStateMachine execution: $EXEC_ARN"
+            for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+              SFN_STATUS=$(aws stepfunctions describe-execution --execution-arn "$EXEC_ARN" --region eu-west-1 --query "status" --output text)
+              if [ "$SFN_STATUS" = "SUCCEEDED" ]; then break; fi
+              if [ "$SFN_STATUS" != "RUNNING" ]; then
+                echo "ERROR: Step Functions execution ended with status $SFN_STATUS"
+                aws stepfunctions describe-execution --execution-arn "$EXEC_ARN" --region eu-west-1
+                exit 1
+              fi
+              sleep 3
+            done
+            if [ "$SFN_STATUS" != "SUCCEEDED" ]; then
+              echo "ERROR: Step Functions execution did not finish SUCCEEDED within 45s (status=$SFN_STATUS)"
+              exit 1
+            fi
+            echo "Verified Step Functions status: $SFN_STATUS"
+          fi
+          sleep 5
+          python scripts/verify_gates.py --live "$API_URL" --expected-sha "$GITHUB_SHA"
+          python scripts/verify_gates.py --live "$WEB_APP_URL" --expected-sha "$GITHUB_SHA"
+          python scripts/uat_smoke.py "$API_URL" --expected-sha "$GITHUB_SHA"
+          python scripts/uat_smoke.py "$WEB_APP_URL" --expected-sha "$GITHUB_SHA"
+          python scripts/browser_qa.py "$WEB_APP_URL"
+          KERDON_QA_URL="$WEB_APP_URL" python scripts/workspace_browser_qa.py
+      - name: Teardown ephemeral stack when deploy-smoke-teardown is selected
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy_action == 'deploy-smoke-teardown'
+        run: |
+          WEB_BUCKET=$(aws cloudformation describe-stacks --stack-name kerdon-paypal-eph --region eu-west-1 --query "Stacks[0].Outputs[?OutputKey=='WebAssetsBucketName'].OutputValue" --output text || true)
+          EV_BUCKET=$(aws cloudformation describe-stacks --stack-name kerdon-paypal-eph --region eu-west-1 --query "Stacks[0].Outputs[?OutputKey=='EvidenceBucketName'].OutputValue" --output text || true)
+          if [ -n "$WEB_BUCKET" ] && [ "$WEB_BUCKET" != "None" ]; then aws s3 rm "s3://${WEB_BUCKET}" --recursive || true; fi
+          if [ -n "$EV_BUCKET" ] && [ "$EV_BUCKET" != "None" ]; then aws s3 rm "s3://${EV_BUCKET}" --recursive || true; fi
+          sam delete --stack-name kerdon-paypal-eph --region eu-west-1 --no-prompts
