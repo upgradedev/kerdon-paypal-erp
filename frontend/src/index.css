@@ -95,7 +95,12 @@ p{color:var(--muted);line-height:1.6}
 .ag-preset-row{display:flex;gap:6px;flex-wrap:wrap}
 .ag-chip{font-size:11px;padding:4px 10px;min-height:28px;border-radius:999px;background:var(--sunken);color:var(--muted)}
 .ag-chip.active{background:#4338ca;color:#fff;border-color:#4338ca;font-weight:600}
-.ag-grid-host{width:100%;max-width:100%;overflow-x:hidden;border:1px solid var(--border);border-radius:0 0 8px 8px}
+.ag-scroll-shell{width:100%;max-width:100%;overflow-x:auto;border:1px solid var(--border);border-radius:0 0 8px 8px}
+.ag-grid-host{min-width:100%}
+.ag-grid-host .ag-body-viewport,.ag-grid-host .ag-center-cols-viewport,.ag-grid-host .ag-floating-bottom-viewport,.ag-grid-host .ag-body-horizontal-scroll-viewport{overflow:visible!important}
+.ag-grid-host .ag-body-horizontal-scroll,.ag-grid-host .ag-sticky-top,.ag-grid-host .ag-sticky-bottom,.ag-grid-host .ag-overlay{display:none!important}
+.ag-empty-box{padding:26px 16px;text-align:center;color:var(--muted);font-size:12.5px;border:1px solid var(--border);border-radius:0 0 8px 8px;background:var(--surface)}
+@media(max-width:767px){.ag-grid-host.ag-wide-mobile{min-width:560px}}
 .ag-right-aligned-cell,.ag-tabular-num{text-align:right!important;font-variant-numeric:tabular-nums}
 .ag-pinned-total-cell{font-weight:700!important;border-top:2px solid var(--primary)!important}
 .ag-html-cell button.row-link{font-size:12px}

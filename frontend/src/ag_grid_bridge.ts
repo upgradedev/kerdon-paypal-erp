@@ -193,9 +193,31 @@ export function mountEnterpriseGrid(container: HTMLElement | null, cfg: Enterpri
       '</div>'
     : '';
 
-  container.innerHTML = studioHtml + '<div id="' + uid + '-host" class="ag-grid-host"></div>';
+  const visibleColCount = cfg.columns.filter((c) => !(isMobile && c.mobileHide)).length;
+  const wideMobileClass = visibleColCount >= 4 ? ' ag-wide-mobile' : '';
+  const regionLabel = escHtml(cfg.title || (isEl ? 'Πίνακας οικονομικών δεδομένων' : 'Financial data grid'));
+  const emptyText = escHtml(isEl ? 'Δεν βρέθηκαν εγγραφές για αυτό το φίλτρο.' : 'No records match the current filter.');
+
+  container.innerHTML =
+    studioHtml +
+    '<div id="' +
+    uid +
+    '-shell" class="ag-scroll-shell" tabindex="0" role="region" aria-label="' +
+    regionLabel +
+    '"><div id="' +
+    uid +
+    '-host" class="ag-grid-host' +
+    wideMobileClass +
+    '"></div></div>' +
+    '<div id="' +
+    uid +
+    '-empty" class="ag-empty-box" role="status" hidden>' +
+    emptyText +
+    '</div>';
+  const shell = document.getElementById(uid + '-shell') as HTMLElement | null;
+  const emptyBox = document.getElementById(uid + '-empty') as HTMLElement | null;
   const host = document.getElementById(uid + '-host') as HTMLElement | null;
-  if (!host) return null;
+  if (!host || !shell || !emptyBox) return null;
 
   const hasSums = cfg.columns.some((c) => c.sumCents);
   const firstColField = cfg.columns[0]?.field || 'col0';
@@ -296,7 +318,55 @@ export function mountEnterpriseGrid(container: HTMLElement | null, cfg: Enterpri
     return { filtered: working, sortField, sortDir };
   };
 
+  const patchAgAccessibility = (shownCount: number) => {
+    shell.hidden = shownCount === 0;
+    emptyBox.hidden = shownCount > 0;
+    if (shownCount === 0) return;
+
+    host.querySelectorAll('.ag-tab-guard, .ag-overlay, .ag-body-horizontal-scroll, .ag-body-vertical-scroll, .ag-sticky-top, .ag-sticky-bottom, .ag-aria-description-container').forEach((el: any) => {
+      el.setAttribute('aria-hidden', 'true');
+      el.removeAttribute('tabindex');
+      el.style.display = 'none';
+    });
+
+    const root = host.querySelector('.ag-root') as HTMLElement | null;
+    if (!root) return;
+    root.setAttribute('role', 'grid');
+
+    root.querySelectorAll('[role="rowgroup"], [data-ag-orig-role="rowgroup"]').forEach((rg: any) => {
+      if (rg.querySelector('[role="row"]')) {
+        rg.setAttribute('role', 'rowgroup');
+        rg.removeAttribute('aria-hidden');
+        if (rg.style.display === 'none') rg.style.display = '';
+      } else {
+        rg.setAttribute('data-ag-orig-role', 'rowgroup');
+        rg.setAttribute('role', 'none');
+        rg.setAttribute('aria-hidden', 'true');
+        rg.style.display = 'none';
+      }
+    });
+
+    root.querySelectorAll('*').forEach((el: any) => {
+      if (el.closest('[aria-hidden="true"]') || el.style?.display === 'none') return;
+      const role = el.getAttribute('role');
+      if (!el.closest('[role="row"]') && role !== 'rowgroup') {
+        el.removeAttribute('tabindex');
+        Array.from(el.attributes).forEach((attr: any) => {
+          if (attr.name.startsWith('aria-')) el.removeAttribute(attr.name);
+        });
+        el.setAttribute('role', 'presentation');
+      } else if (el.closest('[role="row"]') && !el.closest('[role="columnheader"], [role="gridcell"]') && role !== 'row') {
+        el.removeAttribute('tabindex');
+        Array.from(el.attributes).forEach((attr: any) => {
+          if (attr.name.startsWith('aria-')) el.removeAttribute(attr.name);
+        });
+        el.setAttribute('role', 'presentation');
+      }
+    });
+  };
+
   const initial = filterRows();
+  let currentShownCount = initial.filtered.length;
   const gridOptions: GridOptions = {
     theme: (isLightMode() ? kerdonLightTheme : kerdonDarkTheme) as any,
     columnDefs: colDefs,
@@ -305,17 +375,22 @@ export function mountEnterpriseGrid(container: HTMLElement | null, cfg: Enterpri
     domLayout: 'autoHeight',
     suppressColumnVirtualisation: true,
     suppressRowVirtualisation: true,
+    suppressHorizontalScroll: true,
+    suppressNoRowsOverlay: true,
     suppressCellFocus: true,
     animateRows: false,
-    overlayNoRowsTemplate:
-      '<span class="ag-empty-msg">' + escHtml(isEl ? 'Δεν βρέθηκαν εγγραφές για αυτό το φίλτρο.' : 'No records match the current filter.') + '</span>',
     onModelUpdated: () => {
+      patchAgAccessibility(currentShownCount);
       cfg.onRendered?.();
+    },
+    onGridSizeChanged: () => {
+      patchAgAccessibility(currentShownCount);
     },
   };
 
   const api = createGrid(host, gridOptions);
   activeGrids.add({ el: host, api });
+  patchAgAccessibility(currentShownCount);
 
   const updateCountBadge = (shown: number) => {
     const badge = document.getElementById(uid + '-count');
@@ -329,6 +404,8 @@ export function mountEnterpriseGrid(container: HTMLElement | null, cfg: Enterpri
 
   const refreshGridState = () => {
     const res = filterRows();
+    currentShownCount = res.filtered.length;
+    shell.hidden = false;
     api.setGridOption('rowData', res.filtered);
     api.setGridOption('pinnedBottomRowData', computePinnedTotals(res.filtered));
     if (res.sortField) {
@@ -337,6 +414,7 @@ export function mountEnterpriseGrid(container: HTMLElement | null, cfg: Enterpri
         defaultState: { sort: null },
       });
     }
+    patchAgAccessibility(currentShownCount);
     updateCountBadge(res.filtered.length);
     cfg.onRendered?.();
   };
