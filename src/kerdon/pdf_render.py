@@ -298,19 +298,26 @@ def resolve_and_render_tenant_pdf(
     if target_id in ext.drafts:
         ed = ext.drafts[target_id]
         doc_dir = Direction.SALES_REVENUE if ed.module == "sales" else Direction.PURCHASE_EXPENSE
+        cp_obj = state.crm.customers.get(ed.counterparty_id) or state.crm.suppliers.get(ed.counterparty_id)
+        cp_name = getattr(cp_obj, "legal_name", "") or ed.counterparty_id or "Draft Counterparty"
+        cp_tin = getattr(cp_obj, "tax_id", "") or "N/A"
         synth_doc = DocumentRegisterEntry(
             document_id=ed.draft_id,
             tenant_id=state.tenant.tenant_id,
-            counterparty_id=ed.counterparty_id or "DRAFT",
             direction=doc_dir,
+            counterparty_id=ed.counterparty_id or "DRAFT",
+            counterparty_name=cp_name,
+            counterparty_tax_id=cp_tin,
+            doc_type="SALES_DRAFT" if ed.module == "sales" else "PURCHASE_DRAFT",
             net_cents=ed.net_cents,
             vat_cents=ed.vat_cents,
             gross_cents=ed.gross_cents,
             paid_cents=0,
+            currency=ed.currency or "EUR",
             issued_date=ed.issued_date or "2026-10-31",
             due_date=ed.due_date or "2026-11-30",
-            einvoice_mark="UNPOSTED_DRAFT",
             source_sha256=ed.attachment_sha256 or hashlib.sha256(ed.draft_id.encode("utf-8")).hexdigest(),
+            einvoice_mark="UNPOSTED_DRAFT",
         )
         out_items = tuple(
             OutboundLineItem(
@@ -324,25 +331,33 @@ def resolve_and_render_tenant_pdf(
             )
             for ln in ed.lines
         )
-        return render_register_document_pdf(synth_doc, state.tenant, line_items=out_items or None)
+        return render_register_document_pdf(synth_doc, state.tenant, counterparty_name=cp_name, line_items=out_items or None)
     for ev in state.ledger.events:
         if ev.event_id == target_id:
             tot = sum(ln.debit_cents for ln in ev.lines)
+            cp_id = next((ln.counterparty_id for ln in ev.lines if ln.counterparty_id), "GL")
+            cp_obj = state.crm.customers.get(cp_id) or state.crm.suppliers.get(cp_id)
+            cp_name = getattr(cp_obj, "legal_name", "") or cp_id
+            cp_tin = getattr(cp_obj, "tax_id", "") or "GL_JOURNAL"
             synth_ev_doc = DocumentRegisterEntry(
                 document_id=ev.event_id,
                 tenant_id=state.tenant.tenant_id,
-                counterparty_id=next((ln.counterparty_id for ln in ev.lines if ln.counterparty_id), "GL"),
                 direction=Direction.PURCHASE_EXPENSE,
+                counterparty_id=cp_id,
+                counterparty_name=cp_name,
+                counterparty_tax_id=cp_tin,
+                doc_type="JOURNAL_VOUCHER",
                 net_cents=tot,
                 vat_cents=0,
                 gross_cents=tot,
                 paid_cents=tot,
+                currency="EUR",
                 issued_date=ev.posted_date,
                 due_date=ev.posted_date,
-                einvoice_mark="GL_VOUCHER",
                 source_sha256=ev.source_sha256,
+                einvoice_mark="GL_VOUCHER",
             )
-            return render_register_document_pdf(synth_ev_doc, state.tenant)
+            return render_register_document_pdf(synth_ev_doc, state.tenant, counterparty_name=cp_name)
     if state.outbound_drafts:
         return render_outbound_draft_pdf(
             state.outbound_drafts[0], state.tenant, sequence_index=1, discount_cents=discount_cents

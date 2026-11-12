@@ -364,6 +364,53 @@ class TestKerdonArchonSuperset(unittest.TestCase):
         )
         self.assertEqual(neg_res["statusCode"], 400)
 
+    def test_phase33_erp_draft_and_gl_event_pdf_render(self) -> None:
+        draft_post = dispatch_http_event(
+            _http_event(
+                "POST",
+                f"/tenants/{self.tid}/drafts",
+                {
+                    "draft_id": "draft-qa-phase33-001",
+                    "module": "sales",
+                    "counterparty_id": "cust-aegean-mobility",
+                    "invoice_number": "DRAFT-QA-001",
+                    "issued_date": "2026-10-28",
+                    "due_date": "2026-11-28",
+                    "description": "QA Live Draft PDF Verification",
+                    "lines": [
+                        {
+                            "line_number": 1,
+                            "description": "QA Live Draft PDF Verification",
+                            "quantity": 2,
+                            "unit_price_cents": 15_000,
+                            "vat_rate_pct": 24,
+                        }
+                    ],
+                },
+            ),
+            store=self.store,
+        )
+        self.assertEqual(draft_post["statusCode"], 201)
+        draft_id = json.loads(draft_post["body"])["draft"]["draft_id"]
+
+        pdf_draft_ev = _http_event("GET", f"/tenants/{self.tid}/docgen/{draft_id}/pdf")
+        pdf_draft_ev["queryStringParameters"] = {"format": "binary"}
+        pdf_draft_res = dispatch_http_event(pdf_draft_ev, store=self.store)
+        self.assertEqual(pdf_draft_res["statusCode"], 200)
+        self.assertTrue(pdf_draft_res.get("isBase64Encoded"))
+        import base64
+        raw_draft_pdf = base64.b64decode(pdf_draft_res["body"])
+        self.assertTrue(raw_draft_pdf.startswith(b"%PDF-1.4"))
+
+        state = self.store.get_tenant_state(self.tid)
+        first_event_id = state.ledger.events[0].event_id
+        pdf_ev_req = _http_event("GET", f"/tenants/{self.tid}/docgen/{first_event_id}/pdf")
+        pdf_ev_req["queryStringParameters"] = {"format": "binary"}
+        pdf_ev_res = dispatch_http_event(pdf_ev_req, store=self.store)
+        self.assertEqual(pdf_ev_res["statusCode"], 200)
+        raw_ev_pdf = base64.b64decode(pdf_ev_res["body"])
+        self.assertTrue(raw_ev_pdf.startswith(b"%PDF-1.4"))
+
 
 if __name__ == "__main__":
     unittest.main()

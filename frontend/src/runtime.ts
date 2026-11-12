@@ -742,6 +742,14 @@ export function mountWorkspaceRuntime(): void {
   $('end').onchange = load;
   if ($('apply')) $('apply').onclick = load;
   $('refresh').onclick = load;
+  let wasMobile = window.innerWidth < 768;
+  window.addEventListener('resize', () => {
+    const nowMobile = window.innerWidth < 768;
+    if (nowMobile !== wasMobile) {
+      wasMobile = nowMobile;
+      render();
+    }
+  });
   window.addEventListener('hashchange', route);
 
   (async () => {
