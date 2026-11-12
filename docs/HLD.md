@@ -63,13 +63,13 @@ sequenceDiagram
     end
 ```
 
-Creating an order persists its provider reference without clearing the invoice. The capture path reads the PayPal settlement breakdown and posts the journal against the linked invoice. PayPal request IDs and the recorded capture reference support safe retry handling. Automated tests cover successful and repeated capture responses. The live agent proof is an order in the buyer-approval stage. [Checkout tests](../tests/test_paypal_live_suite.py)
+Creating an order persists its provider reference without clearing the invoice. The capture path reads the PayPal settlement breakdown and posts the journal against the linked invoice. PayPal request IDs and the recorded capture reference support safe retry handling. Automated tests cover successful and repeated capture responses. In the filmed Sandbox run, the agent created order `5V401147JW927470T`, the buyer approved it and PayPal confirmed capture `3PC343616J2263823`. [Final demo](https://www.youtube.com/watch?v=WmzaWJCReQg) · [Checkout tests](../tests/test_paypal_live_suite.py)
 
 ## Payouts, disputes and subscriptions
 
 - **Payouts.** Treasury preflight checks approval state, evidence, actor separation, beneficiary and reserve floor before the Sandbox request. A late credit note can invalidate a pending approval. The observed Sandbox response was `INSUFFICIENT_FUNDS`, and the approval remained valid for review.
-- **Disputes.** The connector reads the provider's dispute list. The workspace can prepare evidence and record related commission adjustments for review.
-- **Subscriptions and webhooks.** Products, plans and approval links can be created in Sandbox. Subscription activation depends on buyer approval. Webhook registration and signature validation are distinct operations.
+- **Disputes.** The connector reads the provider's dispute list. The Sandbox query returned HTTP 200 with zero cases. The workspace prepares evidence and related commission adjustments for review. Provider submission and dispute outcome remain unverified.
+- **Subscriptions and webhooks.** After Sandbox buyer approval, PayPal returned `ACTIVE` for subscription `I-20GWDNPS6BVM`. PayPal and the deployed Kerdon journal recorded the same `BILLING.SUBSCRIPTION.ACTIVATED` event. The listener verified the signature with PayPal and recorded `SUCCESS` before updating the subscription in Kerdon. Collection in a later cycle remains unverified.
 - **Invoicing.** The adapter can build an Invoicing v2 preview payload. The checkout flow uses Orders v2.
 
 ## Deployment and verification
@@ -86,4 +86,4 @@ The table records design controls relevant to the listed AI Act topics and the d
 | Article 15, accuracy and resilience | Integer-cent checks, provider error handling and automated regression tests. | Measure production behavior under concurrent load and provider failures. |
 | Article 50, transparency of generated content | Agent narration is presented with its engine and tool results. | Review how generated text is labelled when shared outside the workspace. |
 
-[Deployment and test commands](ERP_WORKSPACE.md) · [Hosted release evidence](https://github.com/upgradedev/kerdon-paypal-erp/actions/runs/43179283825)
+[Deployment and test commands](ERP_WORKSPACE.md) · [Hosted release evidence](https://github.com/upgradedev/kerdon-paypal-erp/actions/runs/43196277057)

@@ -12,7 +12,7 @@
 
 **[Open PayPal Commerce](https://d175u4e48xuu3p.cloudfront.net/#module=paypal)** · [Financial statements](https://d175u4e48xuu3p.cloudfront.net/#module=statements) · [Try the demo](#try-the-demo) · [Verification](#verification-and-sandbox-boundaries) · [Architecture](#architecture)
 
-Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/). The public workspace uses synthetic business data and PayPal Sandbox.
+Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/). The public workspace uses synthetic business data and PayPal Sandbox. [Submitted project](https://devpost.com/software/kerdon-paypal-edition) · [Final demo with English captions](https://www.youtube.com/watch?v=WmzaWJCReQg)
 
 [Problem](#the-problem) · [Checkout flow](#how-a-checkout-becomes-a-journal) · [Build and test](#build-and-test) · [Docs and license](#documentation-and-license)
 
@@ -23,6 +23,10 @@ Sofia Marinou, a finance operations director for a multi-store merchant, needs t
 Kerdon links PayPal order and capture IDs to the invoice, then uses the provider's capture breakdown to clear receivables and post cash and fees in integer cents. A Strands agent on Amazon Bedrock Nova Pro can call PayPal tools from the same workspace. PayPal controls buyer authorization and returns provider status. The accounting core validates and posts the journal.
 
 ## Try the demo
+
+To inspect the filmed proof without signing in, open PayPal Commerce and filter settlements to `5V401147JW927470T`. Open its GL Event and linked invoice. If needed, include November 12, 2026 in the accounting date range. In Recurring SaaS Subscriptions, find `I-20GWDNPS6BVM` marked `ACTIVE` at €1.00 per month. [Checkout demo](https://www.youtube.com/watch?v=WmzaWJCReQg&t=18s) · [Subscription and signed webhook](https://www.youtube.com/watch?v=WmzaWJCReQg&t=119s)
+
+To exercise a fresh order in Sandbox:
 
 1. Open **[PayPal Commerce](https://d175u4e48xuu3p.cloudfront.net/#module=paypal)** and choose **Verify Live OAuth2 Scopes** to check the sandbox connection.
 2. Replace the suggested agent goal with **Inspect the Sandbox connection and summarize the account. Only use the status tool.** Choose **Run PayPal Strands Agent** and inspect the engine, tool results and provider mode.
@@ -63,11 +67,12 @@ A confirmed capture debits **cash** for the net amount and **processing expense*
 
 | Surface | Evidence and scope |
 |---|---|
-| **Hosted release** | [Deployed SHA](https://d175u4e48xuu3p.cloudfront.net/DEPLOYED_SHA) and [verified CI run](https://github.com/upgradedev/kerdon-paypal-erp/actions/runs/43179283825) for `73699c8`. The run records 65 tests, 112 live API checks and automated axe checks on the exercised views at 375 and 1280 pixels. |
-| **Checkout** | The live check creates a Sandbox order and verifies PayPal's `ORDER_NOT_APPROVED` response for premature capture. The buyer-approved posting path has [automated coverage](tests/test_paypal_live_suite.py). The workspace's sample entries are fixtures. |
-| **Subscriptions and webhooks** | Sandbox resource creation covers products, plans, subscription approval links and webhook registration. Buyer approval is required to activate a subscription. Webhook signature checks are implemented separately from registration. |
-| **Agent tools** | The hosted writer can run six Strands tools for inspection, checkout, subscriptions, webhooks and governed payouts. The response includes the engine, provider mode and tool results. AgentCore Memory stores an audit event. A deterministic fallback has a separate engine label. |
-| **Payouts and disputes** | Payouts check role separation, evidence and available balance before a provider request. The observed sandbox rejection was `INSUFFICIENT_FUNDS`. Dispute sync reads the provider list, and evidence packets are available for review. |
+| **Hosted release** | [Deployed SHA](https://d175u4e48xuu3p.cloudfront.net/DEPLOYED_SHA), [runtime source at `4e444aa`](https://github.com/upgradedev/kerdon-paypal-erp/tree/4e444aad477e454344587fa72f0acc1051c13273) and [successful CI run](https://github.com/upgradedev/kerdon-paypal-erp/actions/runs/43196277057). Documentation can be updated independently of the runtime release. |
+| **Checkout** | PayPal Sandbox order `5V401147JW927470T` completed with capture `3PC343616J2263823`. Kerdon posted €95.75 cash and €4.25 fees against €100.00 receivables. The linked invoice shows €0 outstanding. A separate premature capture returned `ORDER_NOT_APPROVED` and left the ledger unchanged. Sample rows are labeled as fixtures. |
+| **Subscriptions and webhooks** | A Personal Sandbox buyer approved `I-20GWDNPS6BVM` at €1.00 per month. PayPal and Kerdon both returned `ACTIVE`, and the deployed listener recorded signature verification `SUCCESS` for event `WH-9S05637553950283G-0J356622ME680244H`. Collection in a later billing cycle remains unverified. |
+| **Agent tools** | The hosted writer can run six Strands tools for inspection, checkout, subscriptions, webhooks and governed payouts. The response includes the engine, provider mode, tool results and AgentCore Memory audit status. A deterministic fallback has a separate engine label. |
+| **AG Grid** | The workspace label **AG Grid Studio** refers to the Kerdon views built with AG Grid Community. The filmed settlement is filtered by order ID and exported to CSV. |
+| **Payouts and disputes** | Payouts check role separation, evidence and available balance before a provider request. The observed Sandbox rejection was `INSUFFICIENT_FUNDS`. Dispute sync returned HTTP 200 with zero cases. The workspace prepares evidence for review. Provider evidence submission and case outcome remain unverified. |
 | **Provider boundaries** | The PayPal integration targets Sandbox. Invoicing v2 payloads are previews. The public workspace uses demo identities and synthetic records. Use only sandbox accounts and sample data. |
 
 ## Architecture

@@ -11,7 +11,7 @@ Sofia Marinou uses the [PayPal Commerce workspace](https://d175u4e48xuu3p.cloudf
 3. Choose **Create Live Order v2**. Use **Sync Status** to read the created order's provider state. Approval happens in PayPal Sandbox, using a Sandbox buyer account.
 4. After approval, select **Capture -> GL** for that order. A confirmed capture posts net cash and processing expense against gross receivables. Sample reconciled rows are available for inspection without buyer approval.
 
-The live agent created an order that was still pending buyer approval at verification. The hosted experience also shows sample capture entries. A distinct pre-approval test verified `ORDER_NOT_APPROVED` without a settlement posting.
+To inspect the filmed order, filter to `5V401147JW927470T` and open its GL Event and linked paid invoice. PayPal confirmed capture `3PC343616J2263823`. In Recurring SaaS Subscriptions, `I-20GWDNPS6BVM` shows `ACTIVE` at €1.00 per month after buyer approval and a verified activation webhook. The hosted experience also shows labeled sample entries. A separate premature capture returned `ORDER_NOT_APPROVED` and left the ledger unchanged. [Final demo](https://www.youtube.com/watch?v=WmzaWJCReQg)
 
 ## API routes
 
@@ -44,10 +44,10 @@ python scripts/serve_local.py 8080
 
 The local workspace is at [http://127.0.0.1:8080/](http://127.0.0.1:8080/). Set `PYTHONPATH=src` to run the unit suite with `python -m unittest discover -s tests -v`. Keep `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` unset for offline tests.
 
-The [CI workflow](../.github/workflows/ci.yml) builds the React frontend and deploys the [SAM template](../infra/template.yaml). A standalone deployment requires an AWS deployment role and PayPal Sandbox app credentials. Browser UAT writes synthetic data, so run it on a test environment you control.
+The [CI workflow](../.github/workflows/ci.yml) builds the React frontend and deploys the [SAM template](../infra/template.yaml). A standalone deployment requires an AWS deployment role and PayPal Sandbox app credentials. The live UAT resets the target workspace and writes synthetic data. Run it against an isolated test environment to preserve recorded demo evidence.
 
 ## Scope of the demo
 
-The public deployment uses demo-role fixtures. Treat it as a shared Sandbox workspace. A private customer deployment needs an identity provider, membership configuration and operational review. Invoicing v2 is previewed locally. A successful webhook registration establishes the subscription, while webhook delivery and verification are separate checks. Sandbox payout approval can remain valid if PayPal rejects the request for insufficient funds.
+The public deployment uses demo-role fixtures. Treat it as a shared Sandbox workspace. A private customer deployment needs an identity provider, membership configuration and operational review. Invoicing v2 is previewed locally. Webhook registration configures the listener. For the filmed subscription, PayPal delivered `BILLING.SUBSCRIPTION.ACTIVATED`, the deployed listener verified the signature with `SUCCESS` and Kerdon read the subscription as `ACTIVE`. Collection in a later billing cycle remains unverified. Sandbox payout approval can remain valid if PayPal rejects the request for insufficient funds.
 
 [Architecture](HLD.md) · [Merchant onboarding notes](GTM_PLAYBOOK.md) · [Deployed SHA](https://d175u4e48xuu3p.cloudfront.net/DEPLOYED_SHA)

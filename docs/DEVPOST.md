@@ -14,14 +14,17 @@ The journal debits cash for the net amount, debits expenses for the fee and cred
 
 ## What we verified
 
-- **Live Sandbox and AI.** The Strands agent created a real PayPal Sandbox order for a sample invoice. The order was awaiting buyer approval at verification. A separate pre-approval capture check returned PayPal's `ORDER_NOT_APPROVED` response without a ledger posting.
-- **Accounting.** Automated tests exercise confirmed capture posting and duplicate protection. The public workspace includes sample captures so reviewers can inspect fee reconciliation without Sandbox buyer credentials.
-- **Additional Sandbox flows.** The demo can create a product, plan and subscription approval link and register a webhook. Provider activation, signature verification and a confirmed settlement are separate events. The observed payout attempt returned `INSUFFICIENT_FUNDS`.
-- **Release verification.** The CI run includes unit, API, live Sandbox and browser checks. Its automated accessibility checks cover the exercised mobile and desktop views. [Release run](https://github.com/upgradedev/kerdon-paypal-erp/actions/runs/43179283825)
+- **Live Sandbox and AI.** The Strands agent created order `5V401147JW927470T` for a €100.00 invoice. After buyer approval, PayPal confirmed capture `3PC343616J2263823`. A separate premature capture returned `ORDER_NOT_APPROVED` and left the ledger unchanged.
+- **Accounting.** The live journal `ev-pp-cap-5v401147jw927470t` debits €95.75 cash and €4.25 processing expense against €100.00 receivables. The linked invoice shows €0 outstanding. AG Grid Community filters and exports the same settlement.
+- **Subscription activation.** PayPal and Kerdon both report `ACTIVE` for the buyer-approved €1.00 monthly Sandbox subscription `I-20GWDNPS6BVM`. The deployed listener verified event `WH-9S05637553950283G-0J356622ME680244H` with `SUCCESS`. Collection in a later billing cycle remains unverified.
+- **Disputes and payouts.** The live Sandbox dispute list returned HTTP 200 with zero cases. Evidence packets are prepared in Kerdon for review. Provider evidence submission and case outcome remain unverified. The observed Sandbox payout attempt returned `INSUFFICIENT_FUNDS`.
+- **Release verification.** The CI run for runtime `4e444aa` includes unit, API, live Sandbox and browser checks. Automated accessibility checks cover the exercised mobile and desktop views. [Release run](https://github.com/upgradedev/kerdon-paypal-erp/actions/runs/43196277057)
+
+[Submitted project](https://devpost.com/software/kerdon-paypal-edition) · [Final demo](https://www.youtube.com/watch?v=WmzaWJCReQg) · [Runtime source](https://github.com/upgradedev/kerdon-paypal-erp/tree/4e444aad477e454344587fa72f0acc1051c13273)
 
 ## How we built it
 
-The PayPal HTTPS adapter owns provider calls and passes status, IDs and errors back to the workspace. Strands supplies the tool calls, Bedrock Nova Pro interprets the goal and AgentCore Memory records audit events. Python domain code validates and posts money in integer cents. The React workspace uses AG Grid Community for filtering, tabular review, pinned totals and CSV export. CloudFront, API Gateway, Lambda, DynamoDB and S3 host the demo. [Architecture](HLD.md)
+The PayPal HTTPS adapter owns provider calls and passes status, IDs and errors back to the workspace. Strands supplies the tool calls, Bedrock Nova Pro interprets the goal and the response reports AgentCore Memory audit status. Python domain code validates and posts money in integer cents. The React workspace uses AG Grid Community for filtering, tabular review, pinned totals and CSV export. CloudFront, API Gateway, Lambda, DynamoDB and S3 host the demo. [Architecture](HLD.md)
 
 ## Hackathon work
 
