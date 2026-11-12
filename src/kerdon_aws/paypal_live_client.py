@@ -20,6 +20,7 @@ Covered PayPal Developer Platform APIs:
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
 import json
@@ -62,6 +63,21 @@ def parse_money_cents(money_obj: Any, default_cents: int | None = None) -> int |
         return int(dec)
     except (InvalidOperation, ValueError, TypeError):
         return default_cents
+
+
+def _capture_money_cents(money: Any, currency: str) -> int | None:
+    if not isinstance(money, dict) or money.get("currency_code") != currency:
+        return None
+    value = money.get("value")
+    if not isinstance(value, str):
+        return None
+    try:
+        cents = Decimal(value) * 100
+    except InvalidOperation:
+        return None
+    if not cents.is_finite() or cents < 0 or cents != cents.to_integral_value():
+        return None
+    return int(cents)
 
 
 def _extract_paypal_error(exc: urllib.error.HTTPError) -> tuple[str, str, str]:
@@ -165,9 +181,10 @@ class PayPalConnectorPlugin(PaymentConnectorPort):
         method: str,
         path: str,
         *,
-        body: dict[str, Any] | None = None,
+        body: dict[str, Any] | bytes | None = None,
         request_id: str | None = None,
         token: str | None = None,
+        return_representation: bool = False,
         action_label: str = "PayPal API call",
     ) -> tuple[int, dict[str, Any], str]:
         bearer = token or self._obtain_oauth_token()
@@ -178,7 +195,9 @@ class PayPalConnectorPlugin(PaymentConnectorPort):
         }
         if request_id:
             headers["PayPal-Request-Id"] = request_id[:108]
-        encoded = json.dumps(body).encode("utf-8") if body is not None else None
+        if return_representation:
+            headers["Prefer"] = "return=representation"
+        encoded = json.dumps(body).encode("utf-8") if isinstance(body, dict) else body
         req = urllib.request.Request(
             f"{self.base_url}{path}", data=encoded, headers=headers, method=method
         )
@@ -373,18 +392,26 @@ class PayPalConnectorPlugin(PaymentConnectorPort):
         capture_id = f"PPCAP-{digest[:12]}"
         confirmed_gross, confirmed_fee, confirmed_net, status = gross_cents, None, None, "COMPLETED"
         debug_id = ""
+        captured_date = None
         if self.is_live_configured:
             _, live_res, debug_id = self._request_json(
                 "POST",
                 f"/v2/checkout/orders/{order_id}/capture",
                 body={},
                 request_id=f"cap-{tenant_id}-{order_id}",
+                return_representation=True,
                 action_label="PayPal order capture",
             )
-            pu = (live_res.get("purchase_units") or [{}])[0]
-            caps = pu.get("payments", {}).get("captures") or [{}]
-            cap_obj = caps[0] if caps else {}
-            status = str(cap_obj.get("status") or live_res.get("status") or "").upper().strip()
+            try:
+                purchase_unit, = live_res["purchase_units"]
+                cap_obj, = purchase_unit["payments"]["captures"]
+                status = str(cap_obj["status"]).upper().strip()
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ExternalProviderError(
+                    "PayPal response lacks a single capture with an explicit status",
+                    debug_id=debug_id,
+                    issue="INCOMPLETE_CAPTURE_RECEIPT",
+                ) from exc
             if status != "COMPLETED":
                 raise ExternalProviderError(
                     f"PayPal order capture not COMPLETED (provider returned status='{status or 'UNKNOWN'}')",
@@ -395,21 +422,40 @@ class PayPalConnectorPlugin(PaymentConnectorPort):
             if not capture_id:
                 raise ExternalProviderError("PayPal capture response missing capture id", debug_id=debug_id)
             breakdown = cap_obj.get("seller_receivable_breakdown") or {}
-            confirmed_gross = (
-                parse_money_cents(breakdown.get("gross_amount") or cap_obj.get("amount"), gross_cents)
-                or gross_cents
-            )
-            confirmed_fee = parse_money_cents(breakdown.get("paypal_fee"), None)
-            confirmed_net = parse_money_cents(breakdown.get("net_amount"), None)
+            if not isinstance(breakdown, dict):
+                breakdown = {}
+            confirmed_gross = _capture_money_cents(breakdown.get("gross_amount"), currency)
+            confirmed_fee = _capture_money_cents(breakdown.get("paypal_fee"), currency)
+            confirmed_net = _capture_money_cents(breakdown.get("net_amount"), currency)
             if (
-                confirmed_fee is not None
-                and confirmed_net is not None
-                and confirmed_gross - confirmed_fee != confirmed_net
+                confirmed_gross is None
+                or confirmed_fee is None
+                or confirmed_net is None
+                or confirmed_gross <= 0
+                or confirmed_gross != gross_cents
+                or confirmed_net <= 0
+                or confirmed_gross - confirmed_fee != confirmed_net
+                or (
+                    "amount" in cap_obj
+                    and _capture_money_cents(cap_obj["amount"], currency) != confirmed_gross
+                )
             ):
                 raise ExternalProviderError(
-                    f"PayPal breakdown mismatch: gross {confirmed_gross}c - fee {confirmed_fee}c != net {confirmed_net}c",
+                    "PayPal capture gross, fee and net do not reconcile to the expected amount and currency",
                     debug_id=debug_id,
+                    issue="CAPTURE_BREAKDOWN_MISMATCH",
                 )
+            try:
+                created_at = datetime.fromisoformat(str(cap_obj.get("create_time") or "").replace("Z", "+00:00"))
+                if created_at.utcoffset() is None:
+                    raise ValueError("timezone required")
+                captured_date = created_at.astimezone(timezone.utc).date().isoformat()
+            except (OverflowError, ValueError) as exc:
+                raise ExternalProviderError(
+                    "PayPal capture response lacks a valid capture timestamp",
+                    debug_id=debug_id,
+                    issue="INCOMPLETE_CAPTURE_RECEIPT",
+                ) from exc
         return {
             "order_id": order_id,
             "capture_id": capture_id,
@@ -417,6 +463,7 @@ class PayPalConnectorPlugin(PaymentConnectorPort):
             "fee_cents": confirmed_fee,
             "net_cents": confirmed_net,
             "currency": currency,
+            "captured_date": captured_date,
             "status": status,
             "debug_id": debug_id,
             "provider_mode": self.mode_label,
@@ -623,19 +670,9 @@ class PayPalConnectorPlugin(PaymentConnectorPort):
                 "event_types": event_names,
                 "provider_mode": self.mode_label,
             }
-        _, listed, dbg = self._request_json(
-            "GET", "/v1/notifications/webhooks", action_label="PayPal list webhooks"
-        )
-        for wh in listed.get("webhooks") or []:
-            if isinstance(wh, dict) and str(wh.get("url") or "").rstrip("/") == webhook_url.rstrip("/"):
-                return {
-                    "webhook_id": str(wh.get("id") or ""),
-                    "url": str(wh.get("url") or webhook_url),
-                    "event_types": [e.get("name") for e in (wh.get("event_types") or []) if isinstance(e, dict)],
-                    "already_registered": True,
-                    "debug_id": dbg,
-                    "provider_mode": self.mode_label,
-                }
+        existing = self.find_registered_webhook(webhook_url=webhook_url)
+        if existing is not None:
+            return existing
         _, created, dbg2 = self._request_json(
             "POST",
             "/v1/notifications/webhooks",
@@ -651,6 +688,31 @@ class PayPalConnectorPlugin(PaymentConnectorPort):
             "provider_mode": self.mode_label,
         }
 
+    def find_registered_webhook(self, *, webhook_url: str) -> dict[str, Any] | None:
+        """Look up the listener ID under the app's own PayPal credentials."""
+        _, listed, dbg = self._request_json(
+            "GET", "/v1/notifications/webhooks", action_label="PayPal list webhooks"
+        )
+        for webhook in listed.get("webhooks") or []:
+            if (
+                isinstance(webhook, dict)
+                and webhook.get("id")
+                and str(webhook.get("url") or "").rstrip("/") == webhook_url.rstrip("/")
+            ):
+                return {
+                    "webhook_id": str(webhook["id"]),
+                    "url": str(webhook["url"]),
+                    "event_types": [
+                        event.get("name")
+                        for event in (webhook.get("event_types") or [])
+                        if isinstance(event, dict)
+                    ],
+                    "already_registered": True,
+                    "debug_id": dbg,
+                    "provider_mode": self.mode_label,
+                }
+        return None
+
     def verify_webhook_via_api(
         self,
         *,
@@ -660,21 +722,23 @@ class PayPalConnectorPlugin(PaymentConnectorPort):
         auth_algo: str,
         transmission_sig: str,
         webhook_id: str,
-        webhook_event: dict[str, Any],
+        webhook_event: bytes,
     ) -> dict[str, Any]:
         """Verify a webhook event against PayPal `POST /v1/notifications/verify-webhook-signature`."""
+        metadata = {
+            "transmission_id": transmission_id,
+            "transmission_time": transmission_time,
+            "cert_url": cert_url,
+            "auth_algo": auth_algo,
+            "transmission_sig": transmission_sig,
+            "webhook_id": webhook_id,
+        }
+        # Preserve the signed JSON inside PayPal's verification envelope.
+        payload = json.dumps(metadata).encode("utf-8")[:-1] + b',"webhook_event":' + webhook_event + b"}"
         _, res, dbg = self._request_json(
             "POST",
             "/v1/notifications/verify-webhook-signature",
-            body={
-                "transmission_id": transmission_id,
-                "transmission_time": transmission_time,
-                "cert_url": cert_url,
-                "auth_algo": auth_algo,
-                "transmission_sig": transmission_sig,
-                "webhook_id": webhook_id,
-                "webhook_event": webhook_event,
-            },
+            body=payload,
             action_label="PayPal verify webhook signature",
         )
         return {

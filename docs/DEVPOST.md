@@ -1,47 +1,34 @@
-# Devpost Submission Copy: Kerdon PayPal Edition
+# Kerdon PayPal Edition
 
-## Project Title
-**Kerdon: Autonomous Agentic Commerce & Governed Double-Entry Mini-ERP on PayPal**
-
-## Tagline
-Kerdon turns PayPal checkouts, subscriptions, disputes, and bills into a balanced double-entry ledger, seller commissions, and Four-Eyes governed payouts.
+**Kerdon turns PayPal checkouts, subscriptions, disputes, and bills into a balanced double-entry ledger, seller commissions, and Four-Eyes governed payouts.**
 
 ## Inspiration
-Multi-store SMB merchants and financial back-offices lose hours and margin every month reconciling PayPal checkouts, unbooked payment processing fees, chargeback disputes, seller commission clawbacks, and manual disbursements. Financial Ops Director **Sofia Marinou** needed an Agentic Commerce workspace that executes real PayPal API workflows and renders CFO-grade financial statements without ever hallucinating a cent in the General Ledger or bypassing payout approvals.
 
-## What It Does
-Kerdon connects **8 live PayPal Developer Platform capabilities** (`https://api-m.sandbox.paypal.com`) and a **6-tool Strands + Bedrock AI copilot** to a **19-module double-entry Mini-ERP & AG Grid v33 Financial Studio**:
-1. **Strands `@tool` PayPal Commerce Agent (`POST /erp/connectors/paypal/agent`):** Orchestrates 6 executable tools on Amazon Bedrock (`eu.amazon.nova-pro-v1:0`) with persistent audit memory (`AWS::BedrockAgentCore::Memory`).
-2. **2-Step Orders v2 + 3-Line Fee GL Reconciliation:** Creates live PayPal `Orders v2` (`checkoutnow?token=...`), blocks unapproved captures fail-closed (`HTTP 502` + `paypal_debug_id`), and books confirmed `seller_receivable_breakdown` (`gross_amount`, `paypal_fee`, `net_amount`) into a balanced 3-line General Ledger entry (`DR 1000_CASH + DR 6200_OPEX = CR 1100_AR`).
-3. **Catalog Products v1, Billing Plans v1 & Subscriptions v1:** Provisions live recurring EUR SaaS billing plans (`PROD-...` -> `P-...` -> `I-...`) with subscriber approval links.
-4. **Four-Eyes Governed Batch Payouts v1:** Enforces Segregation of Duties (`approver_id != executor_id`), Beneficiary Binding, Mandatory Reserve Floor, and **SHA-256 Changed-Evidence invalidation** (`HTTP 409 Conflict` when late supplier credit notes arrive) before calling `POST /v1/payments/payouts`, sealing Spoken + Grade-1 ASCII Braille Aletheia Merkle receipts.
-5. **Customer Disputes v1 + Autonomous Defense Packets + Shipment Tracking v1:** Syncs live PayPal disputes, submits `DHL` fulfillment trackers (`POST /v1/shipping/trackers-batch`), assembles SHA-256 invoice + statutory tax `MARK` defense packets, and posts deterministic seller commission `ClawbackEvent` deductions.
-6. **Log in with PayPal (OIDC v1.1) & Webhooks v1:** Links verified merchant `payer_id` identities and registers + signature-verifies PayPal webhook events with replay deduplication.
-7. **7-Tab Financial Statements Hub & 4-Way Cent-Exact Reconciliation (`/#module=statements`):** Reconciles Dashboard KPIs (with interactive `i` IFRS/GAAP formula tooltips), Income Statement (`P&L`), Balance Sheet, **IAS 7 Direct-Method Cash Flow Statement**, **Cash & PayPal Account Card (`1000_CASH`)**, Customer & Supplier **`DR`/`CR` Counterparty Account Statements**, Trial Balance, AR/AP Aging, and VAT Return (`F2`).
+Sofia Marinou, a finance operations director for a multi-store merchant, needs to know which invoices PayPal has settled and why the cash received differs from the amount billed. A checkout, a buyer approval and a settlement are different events. Keeping those events straight across stores takes time and leaves room for duplicate or premature postings.
 
-## Prize Categories & Sponsor Technologies Targeted
-- **1st Place & Best Use of PayPal + AI:** Deep integration of 8 live PayPal Sandbox APIs (`Orders v2`, `Subscriptions v1`, `Batch Payouts v1`, `Disputes v1`, `Tracking v1`, `Webhooks v1`, `OAuth 2.0`, `OIDC v1.1`) driven by 6 Strands `@tool` functions on Bedrock Nova Pro with zero-SDK integer-cent ledger verification.
-- **Best Use of Agentic Commerce:** Autonomous merchant back-office loop (`Detect -> Reason -> Draft Fix -> Four-Eyes Governed Settlement`) turning raw PayPal payment events and incoming bills into reconciled accounting entries, seller commission clawbacks, and governed payouts.
-- **Best Use of AG Grid:** Maximum enterprise utilization of open-source **`ag-grid-community` (`v33.1.1`)** + **`ag-charts-community` (`v11.1.0`)** (`frontend/src/ag_grid_bridge.ts`, `frontend/src/runtime_statements.ts`, `frontend/src/runtime_paypal.ts`):
-  - **AI Grid Studio Command Bar:** Natural-language and numeric threshold queries (`> 1000`, `open`, `DR`, `PayPal`, `top`) paired with 1-click Smart Financial View chips and instant CSV export.
-  - **Live-Recalculating `pinnedBottomRowData` Double-Entry Totals:** Real-time summation of Debits, Credits, Net Amounts, PayPal Fees (`6200_OPEX`), and Running Balances across the PayPal 3-Line Fee Reconciliation Grid, IAS 7 Cash Flow Statement, Trial Balance, Counterparty `DR`/`CR` Cards, AR/AP Aging, Close Gaps, and Seller Commissions.
-  - **Accessible WCAG-AA Quartz Theme:** Custom `themeQuartz` dark/light mode synchronization, right-aligned `tabular-nums` currency formatting, responsive mobile columns (`375px`), and `0` `axe-core` violations.
-- **Most Creative:** SHA-256 Changed-Evidence Payout Invalidation (`HTTP 409`), 3-Document Payroll Fusion, and Spoken + ASCII Braille Merkle audit receipts (`AletheiaMerkleReceipt`).
+## What it does
 
-## How We Built It
-- **Hexagonal Domain Core (`src/kerdon/`):** Pure Python 3.12 (`29` modules) integer-cent accounting, IAS 7 cash flow & counterparty statement engine (`src/kerdon/statements.py`), 24 completeness rules (`90/90` benchmark accuracy), commissions, and treasury state machines with zero cloud or LLM SDK imports (`Gate A5`).
-- **Live PayPal REST & OIDC Adapter (`src/kerdon_aws/paypal_live_client.py`, `src/kerdon_aws/paypal_routes.py`):** Zero-mock HTTPS client against `https://api-m.sandbox.paypal.com` with `PayPal-Request-Id` idempotency and structured `debug_id` error propagation.
-- **Agentic Orchestration (`src/kerdon_aws/paypal_agent_tools.py`):** AWS Strands Agents SDK `@tool` functions backed by Amazon Bedrock Nova Pro and Bedrock AgentCore Memory.
-- **Enterprise Financial SPA (`frontend/`):** React 18 + TypeScript + Vite 5 + Tailwind CSS 3 + AG Grid v33 + AG Charts v11 served from S3 + CloudFront OAC (`0` `axe-core` violations at `375px` and `1280px`).
+Kerdon puts the PayPal order, its linked invoice and the eventual accounting entry in one workspace. A Strands agent on Amazon Bedrock Nova Pro can inspect the PayPal Sandbox connection and use tools to create a checkout, check an order or request a capture. The buyer authorizes the checkout in PayPal Sandbox. A confirmed capture provides the gross amount, processing fee and net cash used by the accounting engine.
 
-## Challenges We Ran Into
-- **Preventing LLM Arithmetic Drift & Premature Ledger Mutation:** Live PayPal Orders v2 start in `CREATED` state until buyer wallet approval. We separated order creation (`pending_paypal_orders`) from ledger settlement so GL accounts mutate only when PayPal confirms `COMPLETED` capture breakdown.
-- **4-Way Statement & Sub-Ledger Reconciliation:** Guaranteeing that Dashboard tiles, Balance Sheet lines, IAS 7 Cash Flow movements, and individual Customer/Supplier `DR`/`CR` Account Cards match to the exact integer cent across multi-tenant opening balances, PayPal fee splits, and credit-note reversals.
+The journal debits cash for the net amount, debits expenses for the fee and credits accounts receivable for the gross amount. AG Grid shows the amounts and totals beside the provider reference. The same ledger drives the statements workspace. For payouts, the application checks approval, beneficiary and liquidity before making a provider request.
 
-## Accomplishments That We're Proud Of
-- `64/64` unit, 4-way reconciliation, and mocked-HTTPS tests, `109/109` local UAT contract checks, `34/34` live PayPal Sandbox E2E verification checks, `10/10` OWASP API Top-10 security controls (`scripts/security_audit.py`), `90/90` ERP benchmark cases, and `0` `axe-core` violations in a 6-stage GitHub Actions CI/CD pipeline.
+## What we verified
 
-## Try It Out
-- **Live PayPal Agentic Commerce Console:** https://d175u4e48xuu3p.cloudfront.net/#module=paypal
-- **Live 7-Tab Financial Statements & AG Grid Studio:** https://d175u4e48xuu3p.cloudfront.net/#module=statements
-- **Public MIT Repository:** https://github.com/upgradedev/kerdon-paypal-erp
+- **Live Sandbox and AI.** The Strands agent created a real PayPal Sandbox order for a sample invoice. The order was awaiting buyer approval at verification. A separate pre-approval capture check returned PayPal's `ORDER_NOT_APPROVED` response without a ledger posting.
+- **Accounting.** Automated tests exercise confirmed capture posting and duplicate protection. The public workspace includes sample captures so reviewers can inspect fee reconciliation without Sandbox buyer credentials.
+- **Additional Sandbox flows.** The demo can create a product, plan and subscription approval link and register a webhook. Provider activation, signature verification and a confirmed settlement are separate events. The observed payout attempt returned `INSUFFICIENT_FUNDS`.
+- **Release verification.** The CI run includes unit, API, live Sandbox and browser checks. Its automated accessibility checks cover the exercised mobile and desktop views. [Release run](https://github.com/upgradedev/kerdon-paypal-erp/actions/runs/43179283825)
+
+## How we built it
+
+The PayPal HTTPS adapter owns provider calls and passes status, IDs and errors back to the workspace. Strands supplies the tool calls, Bedrock Nova Pro interprets the goal and AgentCore Memory records audit events. Python domain code validates and posts money in integer cents. The React workspace uses AG Grid Community for filtering, tabular review, pinned totals and CSV export. CloudFront, API Gateway, Lambda, DynamoDB and S3 host the demo. [Architecture](HLD.md)
+
+## Hackathon work
+
+The PayPal edition builds on Kerdon's accounting, treasury and invoice workflows. The hackathon work adds the standalone PayPal Sandbox deployment, provider-backed order and capture handling, the commerce agent tools, and the PayPal Commerce and AG Grid review surfaces. The public edition ships under MIT. [Repository and testing instructions](https://github.com/upgradedev/kerdon-paypal-erp)
+
+The PayPal and AI entry focuses on an agent taking a concrete checkout action with provider evidence. AG Grid is used to inspect, filter and export the resulting financial data. [Official prize categories](https://paypalaihackathon.devpost.com/rules)
+
+## Try it
+
+Open [PayPal Commerce](https://d175u4e48xuu3p.cloudfront.net/#module=paypal), run **Verify Live OAuth2 Scopes**, and use the agent or **Create Live Order v2** to inspect a provider-backed order. Try the [financial statements](https://d175u4e48xuu3p.cloudfront.net/#module=statements) with the supplied sample entries. Capturing a newly created order requires a PayPal Sandbox buyer account. The hosted workspace uses synthetic business data.

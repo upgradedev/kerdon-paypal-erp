@@ -3,6 +3,10 @@ import { renderKpiTile } from './kpi_catalog';
 
 let lastPayPalAgentResult: any = null;
 
+function isVerifiedSandboxCapture(order: any): boolean {
+  return order.provider_mode === 'paypal-sandbox-live' && order.status === 'COMPLETED';
+}
+
 export function renderPayPalCommerceSection(ctx: any): string {
   const { esc, money, source, table, hbarChart, stackedChart, lang, data, isPayPalActive } = ctx;
   if (!isPayPalActive()) {
@@ -15,6 +19,8 @@ export function renderPayPalCommerceSection(ctx: any): string {
   const isLive = Boolean(rm.paypal_credentials_present);
   const modeBadge = isLive ? 'LIVE SANDBOX (api-m.sandbox.paypal.com)' : 'SIMULATED FALLBACK';
   const settledOrders: any[] = pp.orders || [];
+  const verifiedCaptureCount = settledOrders.filter(isVerifiedSandboxCapture).length;
+  const sampleCaptureCount = settledOrders.length - verifiedCaptureCount;
   const pendingOrders: any[] = pp.pending_orders || [];
   const subs: any[] = pp.subscriptions || [];
   const webhooks: any[] = pp.webhooks || [];
@@ -37,14 +43,14 @@ export function renderPayPalCommerceSection(ctx: any): string {
       lang: lang || 'en',
       customTitle: 'Captured Gross Volume (Orders v2)',
       valueText: money(totalGross),
-      subText: settledOrders.length + ' settled · ' + pendingOrders.length + ' pending buyer approval',
+      subText: verifiedCaptureCount + ' Sandbox verified · ' + sampleCaptureCount + ' sample · ' + pendingOrders.length + ' pending',
       customTip: {
         meaningEn: 'Total gross customer invoice volume settled via PayPal Checkout Orders v2.',
         meaningEl: 'Συνολικός μικτός όγκος τιμολογίων πελατών που εξοφλήθηκαν μέσω PayPal Orders v2.',
         formulaEn: 'Sum of Captured Order Gross = GL 1100_AR Credits Cleared',
         formulaEl: 'Άθροισμα Εισπράξεων PayPal = Πίστωση Λογ. 1100_ΠΕΛΑΤΕΣ',
-        basisEn: 'PayPal Orders v2 · Reconciled 100% to Customer AR Subledger',
-        basisEl: 'PayPal Orders v2 · 100% συμφωνία με Υποκαθολικό Πελατών',
+        basisEn: 'PayPal Orders v2 and labeled sample data',
+        basisEl: 'PayPal Orders v2 και επισημασμένα δεδομένα δείγματος',
       },
     }) +
     renderKpiTile({
@@ -54,7 +60,7 @@ export function renderPayPalCommerceSection(ctx: any): string {
       valueText: money(totalNet),
       subText: 'Exact net cash credited after merchant fee split',
       customTip: {
-        meaningEn: 'Actual net cash deposited into merchant wallet/bank after PayPal processing fees.',
+        meaningEn: 'Net cash from Sandbox capture receipts and labeled sample rows after PayPal fees.',
         meaningEl: 'Καθαρά διαθέσιμα που πιστώθηκαν μετά την παρακράτηση προμήθειας PayPal.',
         formulaEn: 'Captured Gross (1100_AR) - PayPal Merchant Fees (6200_OPEX)',
         formulaEl: 'Μικτή Είσπραξη (1100_AR) - Προμήθειες PayPal (6200_OPEX)',
@@ -67,12 +73,12 @@ export function renderPayPalCommerceSection(ctx: any): string {
       lang: lang || 'en',
       customTitle: 'PayPal Merchant Fees (GL 6200)',
       valueText: money(totalFees),
-      subText: ((pp.fee_rate_bps || 290) / 100).toFixed(2) + '% + €' + ((pp.fixed_fee_cents || 35) / 100).toFixed(2) + ' auto-booked',
+      subText: 'Reported by PayPal for verified captures',
       customTip: {
         meaningEn: 'Payment processing fees deducted at source and auto-posted to operating expenses.',
         meaningEl: 'Προμήθειες εκκαθάρισης PayPal που καταχωρούνται αυτόματα στα λειτουργικά έξοδα.',
-        formulaEn: 'Gross x 2.90% + EUR 0.35 per capture -> GL 6200_GENERAL_OPERATING_EXPENSE',
-        formulaEl: 'Μικτό x 2,90% + €0,35 ανά συναλλαγή -> Λογ. 6200_OPEX',
+        formulaEn: 'Sum of recorded PayPal fees in GL 6200',
+        formulaEl: 'Άθροισμα καταχωρισμένων προμηθειών PayPal στον λογαριασμό 6200',
         basisEn: 'IFRS 18 Operating Expense · Zero Manual Fee Entry',
         basisEl: 'ΔΠΧΑ 18 Λειτουργικό Έξοδο · Αυτόματη 3-γραμμη εγγραφή',
       },
@@ -158,6 +164,9 @@ export function renderPayPalCommerceSection(ctx: any): string {
     '<span class="badge">' +
     esc(modeBadge) +
     '</span></div>' +
+    (sampleCaptureCount
+      ? '<p class="muted">Totals include synthetic sample captures. Check the Source column for Sandbox-verified rows.</p>'
+      : '') +
     kpiStrip +
     chartsRow +
     '<div class="toolbar" style="flex-wrap:wrap;gap:8px;margin-bottom:12px">' +
@@ -187,7 +196,7 @@ export function renderPayPalCommerceSection(ctx: any): string {
     '<strong>Strands Agents SDK + Amazon Bedrock PayPal Copilot (6 Executable @tool Functions)</strong>' +
     '<div class="toolbar" style="margin-top:8px;gap:8px;flex-wrap:wrap">' +
     '<label for="paypal-agent-input" class="sr-only">PayPal AI Agent goal</label>' +
-    '<input id="paypal-agent-input" aria-label="PayPal AI Agent goal" style="flex:1;min-width:150px;max-width:100%" value="Inspect Sandbox status, create a live Checkout Order v2 for the next unpaid invoice, provision a SaaS Subscription Plan v1, and diagnose Treasury Payouts">' +
+    '<input id="paypal-agent-input" aria-label="PayPal AI Agent goal" style="flex:1;min-width:150px;max-width:100%" value="Create one PayPal Sandbox checkout order for the next unpaid invoice and return the buyer approval link.">' +
     '<button type="button" id="paypal-agent-run-btn" class="primary">Run PayPal Strands Agent</button>' +
     '</div>' +
     agentBox +
@@ -315,7 +324,7 @@ export function bindPayPalCommerceEvents(ctx: any): void {
       onRendered: bindTrackButtons,
       columns: [
         { field: 'order_html', headerName: 'Order ID', isHtml: true, minWidth: 102, maxWidth: 150 },
-        { field: 'inv_html', headerName: 'Invoice v2', isHtml: true, minWidth: 98, maxWidth: 145, mobileHide: true },
+        { field: 'evidence', headerName: 'Source', minWidth: 98, maxWidth: 145, mobileHide: true },
         { field: 'doc_html', headerName: 'ERP Document', isHtml: true, minWidth: 108, maxWidth: 165 },
         { field: 'gross_cents', headerName: 'Gross (1100_AR)', cents: true, sumCents: true, minWidth: 104 },
         { field: 'paypal_fee_cents', headerName: 'PayPal Fee (6200)', cents: true, sumCents: true, minWidth: 98 },
@@ -331,8 +340,8 @@ export function bindPayPalCommerceEvents(ctx: any): void {
           gross_cents: o.gross_cents || 0,
           paypal_fee_cents: o.paypal_fee_cents || 0,
           net_settled_cents: o.net_settled_cents || 0,
-          order_html: '<code>' + esc(o.order_id) + '</code>',
-          inv_html: '<code>' + esc(o.paypal_invoice_id || '-') + '</code>',
+          order_html: '<code title="Capture ' + esc(o.capture_id || '-') + '">' + esc(o.order_id) + '</code>',
+          evidence: isVerifiedSandboxCapture(o) ? 'Sandbox verified' : 'Sample data',
           doc_html: source(o.document_id),
           gl_html: jid ? link('accounting', jid, jLabel) : '-',
           act_html:

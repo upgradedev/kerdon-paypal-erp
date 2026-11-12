@@ -30,16 +30,16 @@ export function renderServicesPartB(ctx: any, r: any, view: any): void {
           renderKpiTile({
             metricKey: 'gross_margin',
             lang: lang || 'en',
-            customTitle: 'Period COGS Posted (GL 5000)',
+            customTitle: 'Dispatch Cost (Inventory)',
             valueText: money(cogsCents),
             subText: movs.length + ' stock movement(s) in audit trail',
             customTip: {
               meaningEn: 'Direct cost of goods dispatched to customers during the period.',
               meaningEl: 'Κόστος πωληθέντων εμπορευμάτων που διακινήθηκαν στην περίοδο.',
-              formulaEn: 'Sum of Dispatched Qty x WAC Unit Cost -> GL 5000_COGS',
-              formulaEl: 'Ποσότητα Εξαγωγής x Μέσο Κόστος Μονάδας -> Λογ. 5000_ΚΟΣΤΟΣ_ΠΩΛΗΘΕΝΤΩΝ',
-              basisEn: 'IFRS 15 / IAS 2 Matching Principle',
-              basisEl: 'ΔΛΠ 2 Συμφωνία Αποθήκης & Κατάστασης Αποτελεσμάτων',
+              formulaEn: 'Sum of dispatched quantity multiplied by weighted average unit cost',
+              formulaEl: 'Άθροισμα ποσότητας εξαγωγής επί μέσο σταθμικό κόστος μονάδας',
+              basisEn: 'Inventory movement records. The P&L shows amounts posted to the ledger.',
+              basisEl: 'Κινήσεις αποθήκης. Η κατάσταση αποτελεσμάτων εμφανίζει ποσά του καθολικού.',
             },
           }) +
           renderKpiTile({

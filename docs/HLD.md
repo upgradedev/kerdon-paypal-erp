@@ -1,81 +1,89 @@
-# High-Level Design (HLD): Kerdon PayPal Edition
+# High-level design
 
 **Kerdon turns PayPal checkouts, subscriptions, disputes, and bills into a balanced double-entry ledger, seller commissions, and Four-Eyes governed payouts.**
 
-## 1. Architectural Principles
+For Sofia Marinou, the record of a payment must tie together a PayPal ID, an ERP invoice and balanced journal lines. The PayPal edition runs on the `kerdon-paypal-dev` stack in `eu-west-1`. The [public workspace](https://d175u4e48xuu3p.cloudfront.net/#module=paypal) uses Sandbox and synthetic business records.
 
-1. **Deterministic Ledger Authority (`Gate A5`):** `src/kerdon/` owns all accounting, tax, commission, and treasury math in integer cents and imports zero network, clock, cloud, or LLM libraries.
-2. **Fail-Closed Upstream PayPal Integration:** `src/kerdon_aws/paypal_live_client.py` communicates over HTTPS with `https://api-m.sandbox.paypal.com`. Upstream rejections (`ORDER_NOT_APPROVED`, `INSUFFICIENT_FUNDS`) raise `ExternalProviderError` (`HTTP 502`) carrying PayPal's `debug_id` and `issue` code while leaving General Ledger balances and `VALID` treasury approvals untouched.
-3. **Least-Privilege Three-Role Compute (`Gate A7`):** Separate `ReaderFunction`, `EvaluatorFunction`, and `WriterFunction` AWS Lambda roles (`infra/template.yaml`) isolate read queries, non-mutating AI evaluations, and governed state mutations.
-
----
-
-## 2. Hexagonal Component Topology
+## Components and trust boundaries
 
 ```mermaid
-flowchart TD
-    subgraph Edge["CloudFront CDN & S3 OAC"]
-        SPA["React 18 + TypeScript SPA (frontend/src/runtime_paypal.ts)"]
-    end
-    subgraph Compute["AWS HTTP API v2 + 3-Role Lambda Separation"]
-        RD["ReaderFunction (DynamoDBReadPolicy)"]
-        EV["EvaluatorFunction (Bedrock + AgentCore Read/Record)"]
-        WR["WriterFunction (Governed Mutations + Strands @tool)"]
-    end
-    subgraph Domain["Pure Hexagonal Core (src/kerdon/)"]
-        GL["Double-Entry GL (ledger.py)"]
-        TR["Four-Eyes Treasury (treasury.py)"]
-        CM["Commissions & Clawbacks (commissions.py)"]
-        PPD["PayPal Domain Schemas (paypal_schema.py, connectors.py)"]
-    end
-    subgraph External["Live External Services"]
-        PPSB["PayPal Sandbox (api-m.sandbox.paypal.com)"]
-        BED["Amazon Bedrock (eu.amazon.nova-pro-v1:0)"]
-        ACM["Bedrock AgentCore Memory"]
-        DDB["DynamoDB (kerdon-paypal-app / approvals)"]
-    end
-    SPA --> RD
-    SPA --> EV
-    SPA --> WR
-    WR --> Domain
-    WR --> PPSB
-    WR --> BED
-    WR --> ACM
-    WR --> DDB
-    RD --> DDB
+flowchart TB
+    UI["React and AG Grid workspace"] --> CDN["CloudFront"]
+    CDN --> WEB["Private S3 web assets"]
+    CDN --> API["API Gateway HTTP API"]
+    API --> R["Reader Lambda"]
+    API --> E["Evaluator Lambda"]
+    API --> W["Writer Lambda"]
+    R --> DB["DynamoDB app journal and approval table"]
+    E --> N["Bedrock Nova Pro"]
+    E --> M["Bedrock AgentCore Memory"]
+    W --> S["Strands commerce tools"]
+    W --> P["PayPal HTTPS adapter"]
+    S --> N
+    S --> M
+    S --> P
+    P --> PP["PayPal Sandbox"]
+    W --> K["Python domain and ledger"]
+    S --> K
+    W --> DB
+    W --> EV["Private S3 evidence"]
 ```
 
----
+| Component | Responsibility |
+|---|---|
+| [PayPal HTTPS adapter](../src/kerdon_aws/paypal_live_client.py) | Obtains OAuth tokens, calls provider endpoints and returns structured results with resource IDs or a PayPal issue and debug ID. |
+| [Strands commerce tools](../src/kerdon_aws/paypal_agent_tools.py) | Exposes inspection, checkout, subscription, webhook and payout tools. The response includes the runtime mode, tool results and audit-memory status. |
+| [Accounting domain](../src/kerdon/) | Validates invoice, ledger, treasury and commission rules. Monetary arithmetic uses integer cents. The model operates through tools and does not author journal amounts. |
+| [Persistence adapter](../src/kerdon_aws/persistence.py) | Reads and writes the DynamoDB journal and approval records. Supported replay paths rebuild state from recorded provider results. Evidence bytes are stored in S3. |
+| [SAM deployment](../infra/template.yaml) | Separates Reader, Evaluator and Writer roles. CloudFront serves the web bundle from private S3 and routes API requests to API Gateway. |
 
-## 3. PayPal Agentic Tool & Four-Eyes Payout Sequence
+## Order and capture
 
 ```mermaid
 sequenceDiagram
-    participant Dir as Sofia Marinou (Approver)
-    participant Exe as Treasury Officer (Executor)
-    participant WR as WriterFunction (paypal_routes.py)
-    participant TR as Treasury Guard (treasury.py)
-    participant PP as PayPal Payouts v1
-
-    Dir->>WR: Approve Commission Case (approver_id = act-sofia-marinou)
-    WR->>TR: Seal Approval + SHA-256 Evidence Digest (state = VALID)
-    Exe->>WR: POST /erp/connectors/paypal/payout (executor_id = act-nikos-alexiou)
-    WR->>TR: Verify Four-Eyes, Beneficiary Email, Reserve Floor & Evidence Hash
-    WR->>PP: POST /v1/payments/payouts (PayPal-Request-Id)
-    alt Wallet Funded (201 CREATED)
-        PP-->>WR: payout_batch_id + batch_status
-        WR->>PP: GET /v1/payments/payouts/{payout_batch_id}
-        WR->>TR: Mark Approval EXECUTED + Mint Spoken/Braille Receipt
-    else Provider Rejection (422 INSUFFICIENT_FUNDS)
-        PP-->>WR: 422 + debug_id
-        WR-->>Exe: HTTP 502 Fail-Closed (Approval remains VALID, zero GL drift)
+    actor Operator
+    actor Buyer
+    participant W as Kerdon writer
+    participant P as PayPal Sandbox
+    participant L as Accounting domain
+    Operator->>W: Choose invoice and create order
+    W->>P: Create Orders v2 resource
+    P-->>W: Order ID and buyer approval link
+    W-->>Operator: Pending order
+    Buyer->>P: Approve checkout
+    Operator->>W: Capture the same order
+    W->>P: Capture Orders v2 resource
+    alt Confirmed capture
+        P-->>W: Capture ID and settlement breakdown
+        W->>L: Validate and apply payment to invoice
+        L-->>Operator: Net cash and fee debits, gross receivable credit
+    else Provider rejection
+        P-->>W: Issue and debug ID
+        W-->>Operator: Failure with no settlement posting
     end
 ```
 
----
+Creating an order persists its provider reference without clearing the invoice. The capture path reads the PayPal settlement breakdown and posts the journal against the linked invoice. PayPal request IDs and the recorded capture reference support safe retry handling. Automated tests cover successful and repeated capture responses. The live agent proof is an order in the buyer-approval stage. [Checkout tests](../tests/test_paypal_live_suite.py)
 
-## 4. Security, Replay Isolation & Accessibility
+## Payouts, disputes and subscriptions
 
-- **Secret Hygiene:** `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` are injected as `NoEcho: true` CloudFormation parameters (`infra/template.yaml`) from encrypted GitHub Actions Secrets and never exposed in client payloads; `SEC-01`..`SEC-10` (`scripts/security_audit.py`) plus `Bandit` and `pip-audit` run on every push.
-- **Journal Replay Determinism:** Every mutating PayPal route records `_replay_provider_receipt` in the DynamoDB event journal (`src/kerdon_aws/paypal_routes.py`), guaranteeing zero outbound PayPal or Bedrock calls during cross-Lambda state hydration (`tests/test_kerdon_aws.py`, `tests/test_paypal_live_suite.py`).
-- **Accessibility & EU AI Act Controls:** Verified `0` `axe-core` violations across mobile (`375px`) and desktop (`1280px`) viewports (`scripts/browser_qa.py`), keyboard-focusable `.table-wrap` regions, Spoken + ASCII Braille payout receipts, and full alignment with EU AI Act Article 10, Article 13, Article 14, Article 15, and Article 50.
+- **Payouts.** Treasury preflight checks approval state, evidence, actor separation, beneficiary and reserve floor before the Sandbox request. A late credit note can invalidate a pending approval. The observed Sandbox response was `INSUFFICIENT_FUNDS`, and the approval remained valid for review.
+- **Disputes.** The connector reads the provider's dispute list. The workspace can prepare evidence and record related commission adjustments for review.
+- **Subscriptions and webhooks.** Products, plans and approval links can be created in Sandbox. Subscription activation depends on buyer approval. Webhook registration and signature validation are distinct operations.
+- **Invoicing.** The adapter can build an Invoicing v2 preview payload. The checkout flow uses Orders v2.
+
+## Deployment and verification
+
+The public stack uses demo identities. Hosted review therefore uses Sandbox accounts and synthetic data. A customer deployment requires an authenticated identity provider and server-side membership enforcement. PayPal credentials are passed to CloudFormation as `NoEcho` parameters from CI secrets. The template configures separate app and approval tables, private evidence storage and AgentCore Memory.
+
+The table records design controls relevant to the listed AI Act topics and the deployment work that remains.
+
+| Topic | Design control | Remaining work |
+|---|---|---|
+| Article 10, data governance | Sample business records and content hashes for evidence. | Define production data sources, access and retention. |
+| Article 13, transparency | Engine and provider mode in the tool response. | Carry that provenance into external-facing exports where appropriate. |
+| Article 14, human oversight | PayPal buyer approval and treasury preflight. | Bind production reviewers to authenticated identities. |
+| Article 15, accuracy and resilience | Integer-cent checks, provider error handling and automated regression tests. | Measure production behavior under concurrent load and provider failures. |
+| Article 50, transparency of generated content | Agent narration is presented with its engine and tool results. | Review how generated text is labelled when shared outside the workspace. |
+
+[Deployment and test commands](ERP_WORKSPACE.md) · [Hosted release evidence](https://github.com/upgradedev/kerdon-paypal-erp/actions/runs/43179283825)

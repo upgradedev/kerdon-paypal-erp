@@ -7,10 +7,34 @@ from typing import Any, Callable
 import urllib.error
 import urllib.request
 
+import kerdon as kd
+
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
         return None
+
+
+def check_paypal_webhook_contract(
+    base: str, hosted: bool, http_call: Callable[..., tuple[int, dict[str, str], str]]
+) -> tuple[bool, str, str]:
+    body = {"id": "WH-UAT-001", "event_type": "PAYMENT.CAPTURE.COMPLETED", "resource": {"id": "PPCAP-UAT"}}
+    if not hosted:
+        transmission = {
+            "transmission_id": "PPTX-UAT-001",
+            "transmission_time": "2026-10-31T12:00:00Z",
+            "webhook_id": "WH-KERDON-ERP-01",
+        }
+        signature = kd.compute_paypal_webhook_signature(
+            raw_body=json.dumps(body["resource"], sort_keys=True), **transmission,
+        )
+        body.update(simulation=True, transmission_sig=signature, **transmission)
+    status, _, reply = http_call("POST", f"{base}/erp/connectors/paypal/webhook", body=body)
+    if hosted:
+        return status == 400, "hosted endpoint rejects a delivery without PayPal headers", reply
+    verification = json.loads(reply).get("verification", {}) if status == 200 else {}
+    ok = verification.get("verification_status") == "SUCCESS" and verification.get("provider_mode") == "paypal-sandbox-simulated"
+    return ok, "explicit offline webhook simulation", reply
 
 
 def run_gtm_and_live_ai_uat(

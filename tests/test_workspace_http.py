@@ -574,6 +574,7 @@ class WorkspaceHttpTests(unittest.TestCase):
             'POST',
             {
                 'event_id': 'WH-EVT-PP-01',
+                'simulation': True,
                 'event_type': 'PAYMENT.CAPTURE.COMPLETED',
                 'transmission_id': 'PPTX-TEST-01',
                 'transmission_time': '2026-10-30T10:00:00Z',
@@ -595,6 +596,7 @@ class WorkspaceHttpTests(unittest.TestCase):
                 'POST',
                 {
                     'event_id': 'WH-EVT-PP-SPOOF',
+                    'simulation': True,
                     'event_type': 'PAYMENT.CAPTURE.COMPLETED',
                     'transmission_id': 'PPTX-TEST-02',
                     'transmission_time': '2026-10-30T10:00:00Z',
@@ -612,6 +614,7 @@ class WorkspaceHttpTests(unittest.TestCase):
                 'POST',
                 {
                     'event_id': 'WH-EVT-PP-01',
+                    'simulation': True,
                     'event_type': 'PAYMENT.CAPTURE.COMPLETED',
                     'transmission_id': 'PPTX-TEST-01',
                     'transmission_time': '2026-10-30T10:00:00Z',

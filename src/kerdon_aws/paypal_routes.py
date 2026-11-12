@@ -6,6 +6,9 @@ with deterministic DynamoDB journal replay (`_replay_provider_receipt`).
 """
 from __future__ import annotations
 
+import base64
+import json
+import os
 from typing import Any
 import uuid
 
@@ -19,6 +22,82 @@ from kerdon.connectors import (
 from .http_utils import ValidationError, json_reply
 from .paypal_agent_tools import run_paypal_commerce_agent_workflow
 from .paypal_live_client import PayPalConnectorPlugin
+
+
+def _handle_webhook(
+    tid: str,
+    state: kd.TenantMiniErpState,
+    body: dict[str, Any],
+    store: Any,
+    pp_plugin: PayPalConnectorPlugin,
+    listener_url: str,
+    event: dict[str, Any],
+    is_replay: bool,
+) -> dict[str, Any]:
+    resource = body.get("resource")
+    event_type = str(body.get("event_type") or "").strip().upper()
+    event_id = str(body.get("id") or "").strip()
+    if is_replay or not pp_plugin.is_live_configured:
+        event_id = event_id or str(body.get("event_id") or body.get("transmission_id") or "").strip()
+    if not event_id or not event_type or not isinstance(resource, dict) or not resource:
+        raise ValidationError("PayPal webhook requires id, event_type, and resource")
+
+    cs = get_connector_state(state)
+    if event_id in cs.processed_webhook_event_ids:
+        raise kd.DuplicateIdempotencyError(f"PayPal webhook '{event_id}' has already been processed")
+
+    replay_receipt = body.get("_replay_provider_receipt")
+    if is_replay and isinstance(replay_receipt, dict):
+        verification = replay_receipt
+    elif is_replay or not pp_plugin.is_live_configured:
+        if not is_replay and (body.get("simulation") is not True or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")):
+            raise ValidationError("PayPal webhook simulation is available only in the offline demo")
+        verification = kd.verify_paypal_webhook_signature(
+            raw_body=json.dumps(resource, sort_keys=True),
+            transmission_id=str(body.get("transmission_id") or ""),
+            transmission_time=str(body.get("transmission_time") or ""),
+            webhook_id=str(body.get("webhook_id") or ""),
+            transmission_sig=str(body.get("transmission_sig") or ""),
+        )
+        verification["provider_mode"] = "paypal-sandbox-simulated"
+    else:
+        headers = {
+            str(key).lower(): str(value).strip()
+            for key, value in (event.get("headers") or {}).items()
+            if value is not None
+        }
+        metadata = {
+            field: headers.get("paypal-" + field.replace("_", "-"), "")
+            for field in ("transmission_id", "transmission_time", "cert_url", "auth_algo", "transmission_sig")
+        }
+        raw = event.get("body")
+        if not all(metadata.values()) or not isinstance(raw, str):
+            raise ValidationError("PayPal webhook requires the signed request body and all PayPal transmission headers")
+        registered = pp_plugin.find_registered_webhook(webhook_url=listener_url)
+        if not registered:
+            raise kd.PermissionDeniedError("PayPal webhook listener is not registered")
+        raw_body = base64.b64decode(raw) if event.get("isBase64Encoded") else raw.encode("utf-8")
+        verification = pp_plugin.verify_webhook_via_api(
+            **metadata, webhook_id=registered["webhook_id"], webhook_event=raw_body
+        )
+
+    if verification.get("verification_status") != "SUCCESS":
+        raise kd.PermissionDeniedError("PayPal webhook signature verification failed")
+    body["_replay_provider_receipt"] = verification
+    cs.processed_webhook_event_ids.add(event_id)
+    resource_id = str(resource.get("id") or "").strip()
+    if event_type == "CHECKOUT.ORDER.APPROVED" and resource_id in cs.pending_paypal_orders:
+        cs.pending_paypal_orders[resource_id]["status"] = "APPROVED"
+    elif event_type == "BILLING.SUBSCRIPTION.ACTIVATED" and resource_id in cs.paypal_subscriptions:
+        cs.paypal_subscriptions[resource_id]["status"] = "ACTIVE"
+    store.persist_audit_record(
+        tid, "PAYPAL_WEBHOOK_VERIFIED", event_id,
+        {"event_id": event_id, "event_type": event_type, "verification": verification},
+    )
+    return json_reply(200, {
+        "webhook_event_id": event_id, "webhook_event_type": event_type,
+        "verification": verification, "routed": True,
+    })
 
 
 def _restore_agent_tools_on_replay(
@@ -83,9 +162,16 @@ def handle_extended_paypal_post(
     pp_plugin: PayPalConnectorPlugin,
     public_origin: str,
     is_replay: bool,
+    event: dict[str, Any] | None = None,
+    webhook_listener_url: str = "",
 ) -> dict[str, Any] | None:
     """Dispatch extended PayPal Developer Platform sub-routes."""
     cs = get_connector_state(state)
+
+    if sub == "connectors/paypal/webhook":
+        return _handle_webhook(
+            tid, state, body, store, pp_plugin, webhook_listener_url, event or {}, is_replay
+        )
 
     if sub == "connectors/paypal/order-status":
         oid = str(body.get("order_id") or "").strip()

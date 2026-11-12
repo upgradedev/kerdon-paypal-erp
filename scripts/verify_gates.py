@@ -282,13 +282,13 @@ def check_infra_isolation(root: Path) -> GateResult:
         return GateResult("INFRA", "NOT_YET_DUE", "infra/template.yaml not created until Phase 2")
     text = template.read_text(encoding="utf-8")
     problems: list[str] = []
-    if "kerdon-msp" not in text and "kerdon-paypal" not in text:
-        problems.append("kerdon-msp/kerdon-paypal stack prefix missing")
-    if "AllowedPattern" not in text:
-        problems.append("StackPrefix has no AllowedPattern guard")
+    if "Default: kerdon-paypal" not in text:
+        problems.append("PayPal edition default stack prefix is missing")
+    if 'AllowedPattern: "^kerdon-paypal(-[a-z0-9]+)?$"' not in text:
+        problems.append("StackPrefix must accept only the PayPal edition namespace")
     if "bedrock:InvokeModelWithResponseStream" not in text:
         problems.append("missing bedrock:InvokeModelWithResponseStream permission")
-    if "kerdon-msp" in text and "AWS::BedrockAgentCore::Memory" not in text:
+    if "AWS::BedrockAgentCore::Memory" not in text:
         problems.append("missing provisioned AWS::BedrockAgentCore::Memory resource")
     for term in CLEAN_ROOM_TERMS:
         if term in text.lower():
@@ -299,7 +299,7 @@ def check_infra_isolation(root: Path) -> GateResult:
     return GateResult(
         "INFRA",
         "PASS",
-        "SAM template enforces kerdon-msp-* isolation and ConverseStream IAM",
+        "SAM template enforces kerdon-paypal-* isolation and ConverseStream IAM",
     )
 
 

@@ -731,13 +731,10 @@ def run_uat_against_base(base_url: str, expected_sha: str | None = None) -> int:
     check(st_fp_de == 200 and json.loads(txt_fp_de).get("fiscal_profile", {}).get("aade_mydata_enabled") is False, "POST /erp/connectors/fiscal-profile parametrically disables AADE myDATA for non-Greek (DE) organization", txt_fp_de)
     st_fp_gr, _, txt_fp_gr = _http_call("POST", f"{base}/erp/connectors/fiscal-profile", body={"country_code": "GR", "doy": "Athens Corporate Tax Office (KEFODE Attikis)"})
     check(st_fp_gr == 200 and json.loads(txt_fp_gr).get("fiscal_profile", {}).get("aade_mydata_enabled") is True, "POST /erp/connectors/fiscal-profile parametrically activates AADE myDATA v1.0.8 + 17.1 Payroll for Greek (GR) organization", txt_fp_gr)
-    import kerdon as kd
-    wh_res = {"id": "PPCAP-UAT"}
-    wh_sig = kd.compute_paypal_webhook_signature(raw_body=json.dumps(wh_res, sort_keys=True), transmission_id="PPTX-UAT-001", transmission_time="2026-10-31T12:00:00Z", webhook_id="WH-KERDON-ERP-01")
-    st_pp_wh, _, txt_pp_wh = _http_call("POST", f"{base}/erp/connectors/paypal/webhook", body={"event_id": "WH-UAT-001", "transmission_id": "PPTX-UAT-001", "transmission_time": "2026-10-31T12:00:00Z", "webhook_id": "WH-KERDON-ERP-01", "event_type": "PAYMENT.CAPTURE.COMPLETED", "transmission_sig": wh_sig, "resource": wh_res})
-    check(st_pp_wh == 200 and json.loads(txt_pp_wh).get("verification", {}).get("verification_status") == "SUCCESS" and len(conn_json.get("paypal", {}).get("agentic_tools", [])) == 6 and pp_disp_json.get("evidence_defense_packet", {}).get("evidence_type") == "PROOF_OF_FULFILLMENT", "PayPal Agentic Commerce: 6 Agentic Tools, Invoicing v2, Autonomous Dispute Evidence Defense & HMAC Webhook verification", txt_pp_wh)
+    from uat_gtm_checks import check_paypal_webhook_contract, run_gtm_and_live_ai_uat
+    webhook_ok, webhook_check, txt_pp_wh = check_paypal_webhook_contract(base, pp_is_live or bool(expected_sha), _http_call)
+    check(webhook_ok and len(conn_json.get("paypal", {}).get("agentic_tools", [])) == 6 and pp_disp_json.get("evidence_defense_packet", {}).get("evidence_type") == "PROOF_OF_FULFILLMENT", f"PayPal Agentic Commerce: 6 tools, evidence packet, and {webhook_check}", txt_pp_wh)
     check("lang-select" in txt_ws and "EN · English" in txt_ws and json.loads(txt_fp_gr).get("fiscal_profile", {}).get("country_name") == "Greece", "Bilingual EN default + EL switcher active across /workspace and fiscal profile", "lang-select")
-    from uat_gtm_checks import run_gtm_and_live_ai_uat
     run_gtm_and_live_ai_uat(base=base, tid=tid, is_live=bool(expected_sha), check=check, http_call=_http_call)
 
     # Clean reset after UAT

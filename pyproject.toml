@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kerdon-msp"
+name = "kerdon-paypal-erp"
 version = "0.3.0"
-description = "Kerdon MSP: Autonomous Mini-ERP and Financial Back-Office on AWS"
+description = "Kerdon PayPal Edition: Sandbox commerce and double-entry accounting"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

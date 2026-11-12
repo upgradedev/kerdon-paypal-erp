@@ -55,7 +55,7 @@ jobs:
         run: python scripts/security_audit.py
 
   stage-3-unit-benchmark-pyramid:
-    name: "Stage 3 (Unit & Benchmark Pyramid): 59 Unit Tests, 90-Case Benchmark & Coverage >=85%"
+    name: "Stage 3 (Unit & Benchmark): Domain Tests, Regression Benchmark & Coverage >=85%"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -74,7 +74,7 @@ jobs:
           python -m coverage report --fail-under=85
 
   stage-4-integration-api-uat:
-    name: "Stage 4 (Integration Pyramid): 108-Check HTTP API v2 Contract & Adversarial UAT"
+    name: "Stage 4 (Integration): HTTP API Contract & UAT"
     needs: [stage-1-static-gates, stage-2-security-gate, stage-3-unit-benchmark-pyramid]
     runs-on: ubuntu-latest
     steps:
@@ -82,7 +82,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Run 108-check HTTP API v2 UAT smoke and negative boundary suite
+      - name: Run HTTP API UAT and negative boundary suite
         env:
           PYTHONPATH: src
         run: python scripts/uat_smoke.py
@@ -102,7 +102,7 @@ jobs:
       - name: Build React 18 + TypeScript + Vite + Tailwind CSS SPA
         run: |
           cd frontend
-          npm install
+          npm ci
           npm run build
           cd ..
           rm -rf src/kerdon_aws/web_dist
@@ -161,7 +161,7 @@ jobs:
       - name: Build React 18 + TypeScript + Vite + Tailwind CSS SPA
         run: |
           cd frontend
-          npm install
+          npm ci
           npm run build
           cd ..
           rm -rf src/kerdon_aws/web_dist
@@ -198,7 +198,7 @@ jobs:
         run: |
           python -m pip install playwright
           python -m playwright install chromium
-      - name: Run live URL readiness check, Step Functions workflow, 111-check live UAT (API + CloudFront), and live E2E Browser QA
+      - name: Verify deployed URL, Step Functions, live API and browser journeys
         env:
           PYTHONPATH: src
           REQUIRE_PAYPAL_LIVE: "1"

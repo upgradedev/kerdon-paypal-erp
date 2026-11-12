@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Kerdon MSP Autonomous Mini-ERP and Financial Back-Office isolated stack
+  Kerdon PayPal Edition commerce and accounting demo stack
   (kerdon-paypal-dev in eu-west-1). Enforces StackPrefix AllowedPattern isolation
   and Least-Privilege Reader, Evaluator, and Writer IAM separation.
 

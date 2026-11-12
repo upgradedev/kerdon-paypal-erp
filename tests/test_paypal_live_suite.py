@@ -113,6 +113,7 @@ class TestPayPalLiveSuite(unittest.TestCase):
             if url.endswith("/v2/checkout/orders/2TP999888777") and method == "GET":
                 return _FakeHttpResponse({"id": "2TP999888777", "status": "APPROVED"})
             if url.endswith("/v2/checkout/orders/2TP999888777/capture") and method == "POST":
+                self.assertEqual(req.get_header("Prefer"), "return=representation")
                 return _FakeHttpResponse(
                     {
                         "id": "2TP999888777",
@@ -124,6 +125,7 @@ class TestPayPalLiveSuite(unittest.TestCase):
                                         {
                                             "id": "CAP-LIVE-001",
                                             "status": "COMPLETED",
+                                            "create_time": "2026-11-12T00:15:00+02:00",
                                             "seller_receivable_breakdown": {
                                                 "gross_amount": {"currency_code": "EUR", "value": "1240.00"},
                                                 "paypal_fee": {"currency_code": "EUR", "value": "36.31"},
@@ -203,6 +205,7 @@ class TestPayPalLiveSuite(unittest.TestCase):
             )
             self.assertEqual(cap["fee_cents"], 3_631)
             self.assertEqual(cap["net_cents"], 120_369)
+            self.assertEqual(cap["captured_date"], "2026-11-11")
 
             payout = plugin.execute_batch_payout(
                 tenant_id=self.tid,
@@ -227,7 +230,7 @@ class TestPayPalLiveSuite(unittest.TestCase):
                 auth_algo="SHA256withRSA",
                 transmission_sig="sig",
                 webhook_id="WH-LIVE-01",
-                webhook_event={"id": "evt-1"},
+                webhook_event=b'{"id":"evt-1"}',
             )
             self.assertEqual(ver["verification_status"], "SUCCESS")
 
@@ -299,6 +302,83 @@ class TestPayPalLiveSuite(unittest.TestCase):
             self.assertEqual(err_body["provider_issue"], "ORDER_NOT_APPROVED")
             self.assertEqual(err_body["paypal_debug_id"], "dbg-unapproved-42")
 
+        gross_cents = state.crm.documents[doc_id].outstanding_cents
+        fee_cents = 135
+        money = lambda cents: {"currency_code": "EUR", "value": f"{cents // 100}.{cents % 100:02d}"}
+        capture = {
+            "id": "CAP-LIVE-HTTP",
+            "status": "COMPLETED",
+            "amount": money(gross_cents),
+            "create_time": "2026-11-12T13:11:00Z",
+            "seller_receivable_breakdown": {
+                "gross_amount": money(gross_cents),
+                "paypal_fee": money(fee_cents),
+                "net_amount": money(gross_cents - fee_cents),
+            },
+        }
+
+        def capture_receipt(obj: dict) -> tuple:
+            return (
+                201,
+                {"status": "COMPLETED", "purchase_units": [{"payments": {"captures": [obj]}}]},
+                "dbg-completed",
+            )
+
+        def capture_request():
+            return _post("capture", {"order_id": oid, "document_id": doc_id, "fee_cents": 7, "captured_date": "2026-10-29"})
+
+        invalid_breakdowns = [
+            {**capture["seller_receivable_breakdown"], "paypal_fee": None},
+            {**capture["seller_receivable_breakdown"], "net_amount": {"currency_code": "USD", "value": "1.00"}},
+            {**capture["seller_receivable_breakdown"], "gross_amount": money(gross_cents + 100)},
+            {**capture["seller_receivable_breakdown"], "paypal_fee": {"currency_code": "EUR", "value": "1.351"}},
+        ]
+        invalid_captures = [
+            {k: v for k, v in capture.items() if k != "status"},
+            {**capture, "status": "PENDING"},
+            {**capture, "create_time": "2026-11-12"},
+            *[{**capture, "seller_receivable_breakdown": value} for value in invalid_breakdowns],
+        ]
+        before = len(state.ledger.events)
+        for obj in invalid_captures:
+            with self.subTest(receipt=obj), patch.object(
+                PayPalConnectorPlugin, "_request_json", return_value=capture_receipt(obj)
+            ):
+                self.assertEqual(capture_request()["statusCode"], 502)
+                self.assertEqual(len(state.ledger.events), before)
+
+        kd.get_connector_state(state).pending_paypal_orders.pop(oid)
+        with patch.object(PayPalConnectorPlugin, "_request_json") as provider, patch.object(
+            PayPalConnectorPlugin, "get_order",
+            return_value={"purchase_units": [{"reference_id": "another-invoice", "amount": money(gross_cents)}]},
+        ):
+            self.assertEqual(capture_request()["statusCode"], 400)
+            provider.assert_not_called()
+        with patch.object(
+            PayPalConnectorPlugin, "_request_json", return_value=capture_receipt(capture)
+        ), patch.object(
+            PayPalConnectorPlugin, "get_order",
+            return_value={"purchase_units": [{"reference_id": doc_id, "amount": money(gross_cents)}]},
+        ) as get_order:
+            posted = capture_request()
+            get_order.assert_called_once_with(oid)
+        self.assertEqual(posted["statusCode"], 201)
+        order = json.loads(posted["body"])["order"]
+        self.assertEqual(order["provider_mode"], "paypal-sandbox-live")
+        self.assertEqual(order["paypal_fee_cents"], fee_cents)
+        self.assertEqual(order["net_settled_cents"], gross_cents - fee_cents)
+        self.assertEqual(order["captured_date"], "2026-11-12")
+        self.assertEqual(state.ledger.events[-1].posted_date, "2026-11-12")
+        self.assertEqual(len(state.ledger.events), before + 1)
+        journal_count = len(self.store.journal_log)
+        with patch.object(PayPalConnectorPlugin, "_request_json") as provider:
+            duplicate = _post("capture", {"order_id": oid})
+            provider.assert_not_called()
+        self.assertEqual(duplicate["statusCode"], 200)
+        self.assertEqual(json.loads(duplicate["body"])["order"], order)
+        self.assertEqual(len(self.store.journal_log), journal_count)
+        self.assertEqual(len(state.ledger.events), before + 1)
+
     def test_strands_bedrock_tool_wrappers_replay_and_webhook_branches(self) -> None:
         state = self.store.get_tenant_state(self.tid)
         state.treasury.create_approval(
@@ -331,6 +411,7 @@ class TestPayPalLiveSuite(unittest.TestCase):
             if "/v1/customer/disputes" in url:
                 return _FakeHttpResponse({"items": [{"dispute_id": "PP-D-202"}]})
             if url.endswith("/v2/checkout/orders") and method == "POST":
+                dyn["capture_gross"] = parse_money_cents(json.loads(req.data)["purchase_units"][0]["amount"])
                 return _FakeHttpResponse(
                     {
                         "id": "2TPAGENT001",
@@ -342,6 +423,8 @@ class TestPayPalLiveSuite(unittest.TestCase):
             if url.endswith("/v2/checkout/orders/2TPAGENT001") and method == "GET":
                 return _FakeHttpResponse({"id": "2TPAGENT001", "status": dyn["order_status"]})
             if url.endswith("/v2/checkout/orders/2TPAGENT001/capture") and method == "POST":
+                gross = dyn["capture_gross"]
+                net = gross - 1485
                 return _FakeHttpResponse(
                     {
                         "id": "2TPAGENT001",
@@ -353,10 +436,11 @@ class TestPayPalLiveSuite(unittest.TestCase):
                                         {
                                             "id": "CAP-AG-01",
                                             "status": "COMPLETED",
+                                            "create_time": "2026-11-12T13:11:00Z",
                                             "seller_receivable_breakdown": {
-                                                "gross_amount": {"currency_code": "EUR", "value": "500.00"},
+                                                "gross_amount": {"currency_code": "EUR", "value": f"{gross // 100}.{gross % 100:02d}"},
                                                 "paypal_fee": {"currency_code": "EUR", "value": "14.85"},
-                                                "net_amount": {"currency_code": "EUR", "value": "485.15"},
+                                                "net_amount": {"currency_code": "EUR", "value": f"{net // 100}.{net % 100:02d}"},
                                             },
                                         }
                                     ]
@@ -372,13 +456,18 @@ class TestPayPalLiveSuite(unittest.TestCase):
             if url.endswith("/v1/billing/subscriptions"):
                 return _FakeHttpResponse({"id": "I-AG-01", "status": "APPROVAL_PENDING", "links": []}, status=201)
             if url.endswith("/v1/notifications/webhooks") and method == "GET":
-                return _FakeHttpResponse({"webhooks": []})
+                return _FakeHttpResponse({"webhooks": [{
+                    "id": "WH-AG-01",
+                    "url": "https://d175u4e48xuu3p.cloudfront.net/erp/connectors/paypal/webhook",
+                }] if dyn.get("webhook_registered") else []})
             if url.endswith("/v1/notifications/webhooks") and method == "POST":
                 return _FakeHttpResponse(
                     {"id": "WH-AG-01", "url": "https://d175u4e48xuu3p.cloudfront.net/erp/connectors/paypal/webhook"}, status=201
                 )
             if url.endswith("/v1/notifications/verify-webhook-signature"):
-                return _FakeHttpResponse({"verification_status": "SUCCESS"})
+                self.assertEqual(json.loads(req.data)["webhook_id"], "WH-AG-01")
+                self.assertIn(dyn["webhook_raw"].encode("utf-8"), req.data)
+                return _FakeHttpResponse({"verification_status": dyn["webhook_verification"]})
             if url.endswith("/v1/payments/payouts/BATCH-AG-01") and method == "GET":
                 return _FakeHttpResponse({"batch_header": {"payout_batch_id": "BATCH-AG-01", "batch_status": "SUCCESS"}, "items": []})
             if url.endswith("/v1/payments/payouts") and method == "POST":
@@ -410,6 +499,7 @@ class TestPayPalLiveSuite(unittest.TestCase):
                 dyn["order_status"] = "APPROVED"
                 captured = json.loads(self.tools["paypal_inspect_or_capture_order_v2"](oid))
                 assert captured["captured"] is True
+                assert captured["order"]["captured_date"] == "2026-11-12"
                 self.tools["paypal_provision_subscription_plan_v1"]("Enterprise", 29_900)
                 self.tools["paypal_register_or_list_webhook_v1"]()
                 miss = json.loads(self.tools["paypal_diagnose_or_execute_payout_v1"]("non-existent"))
@@ -424,12 +514,13 @@ class TestPayPalLiveSuite(unittest.TestCase):
         fake_models.BedrockModel = _FakeBedrockModel
         fake_strands.Agent = _FakeAgent
 
-        def _post_full(path: str, payload: dict) -> dict:
+        def _post_full(path: str, payload: dict | str, headers: dict | None = None) -> dict:
             return kaws.lambda_writer(
                 {
                     "rawPath": path,
                     "requestContext": {"http": {"method": "POST", "path": path}},
-                    "body": json.dumps(payload),
+                    "body": payload if isinstance(payload, str) else json.dumps(payload),
+                    "headers": headers or {},
                 },
                 store=self.store,
             )
@@ -451,40 +542,39 @@ class TestPayPalLiveSuite(unittest.TestCase):
             self.assertIn("strands-bedrock-tools:", ag_out["engine"])
             self.assertEqual(ag_out["tools_executed_count"], 9)
 
-            # Live API-verified webhooks for ORDER.APPROVED and SUBSCRIPTION.ACTIVATED
+            # Provider postback uses the complete original body and actual PayPal headers.
             cs = kd.get_connector_state(state)
             cs.pending_paypal_orders["ORD-WH-1"] = {"order_id": "ORD-WH-1", "status": "CREATED"}
-            r_wh1 = _post_full(
-                "/erp/connectors/paypal/webhook",
-                {
-                    "event_id": "WH-EVT-ORD-1",
-                    "event_type": "CHECKOUT.ORDER.APPROVED",
-                    "transmission_id": "tx-1",
-                    "transmission_time": "2026-11-11T10:00:00Z",
-                    "webhook_id": "WH-AG-01",
-                    "transmission_sig": "sig-1",
-                    "cert_url": "https://api.sandbox.paypal.com/cert.pem",
-                    "auth_algo": "SHA256withRSA",
-                    "resource": {"id": "ORD-WH-1"},
-                },
-            )
+            webhook_path = "/erp/connectors/paypal/webhook"
+            headers = {
+                "PayPal-Transmission-Id": "tx-1",
+                "PayPal-Transmission-Time": "2026-11-11T10:00:00Z",
+                "PayPal-Transmission-Sig": "sig-1",
+                "PayPal-Cert-Url": "https://api.sandbox.paypal.com/cert.pem",
+                "PayPal-Auth-Algo": "SHA256withRSA",
+            }
+            order_event = {
+                "id": "WH-EVT-ORD-1", "event_type": "CHECKOUT.ORDER.APPROVED",
+                "resource": {"id": "ORD-WH-1"}, "event_version": "1.0",
+            }
+            dyn["webhook_raw"] = json.dumps(order_event, indent=2)
+            self.assertEqual(_post_full(webhook_path, dyn["webhook_raw"])["statusCode"], 400)
+            self.assertEqual(_post_full(webhook_path, dyn["webhook_raw"], headers)["statusCode"], 403)
+            dyn["webhook_registered"] = True
+            dyn["webhook_verification"] = "FAILURE"
+            self.assertEqual(_post_full(webhook_path, dyn["webhook_raw"], headers)["statusCode"], 403)
+            self.assertEqual(cs.pending_paypal_orders["ORD-WH-1"]["status"], "CREATED")
+            dyn["webhook_verification"] = "SUCCESS"
+            r_wh1 = _post_full(webhook_path, dyn["webhook_raw"], headers)
             self.assertEqual(r_wh1["statusCode"], 200)
             self.assertEqual(cs.pending_paypal_orders["ORD-WH-1"]["status"], "APPROVED")
+            self.assertEqual(_post_full(webhook_path, dyn["webhook_raw"], headers)["statusCode"], 409)
 
-            r_wh2 = _post_full(
-                "/erp/connectors/paypal/webhook",
-                {
-                    "event_id": "WH-EVT-SUB-1",
-                    "event_type": "BILLING.SUBSCRIPTION.ACTIVATED",
-                    "transmission_id": "tx-2",
-                    "transmission_time": "2026-11-11T10:01:00Z",
-                    "webhook_id": "WH-AG-01",
-                    "transmission_sig": "sig-2",
-                    "cert_url": "https://api.sandbox.paypal.com/cert.pem",
-                    "auth_algo": "SHA256withRSA",
-                    "resource": {"id": "I-AG-01"},
-                },
-            )
+            dyn["webhook_raw"] = json.dumps({
+                "id": "WH-EVT-SUB-1", "event_type": "BILLING.SUBSCRIPTION.ACTIVATED",
+                "resource": {"id": "I-AG-01"},
+            })
+            r_wh2 = _post_full(webhook_path, dyn["webhook_raw"], headers)
             self.assertEqual(r_wh2["statusCode"], 200)
             self.assertEqual(cs.paypal_subscriptions["I-AG-01"]["status"], "ACTIVE")
 

@@ -326,7 +326,11 @@ def handle_post_connectors(
         cs = get_connector_state(state)
         explicit_oid = str(body.get("order_id") or "").strip()
         pending_entry = cs.pending_paypal_orders.get(explicit_oid) if explicit_oid else None
-        doc_id = str(body.get("document_id") or (pending_entry or {}).get("document_id") or "").strip()
+        existing = cs.paypal_orders.get(explicit_oid) if explicit_oid else None
+        doc_id = str(
+            body.get("document_id") or (pending_entry or {}).get("document_id")
+            or (existing.document_id if existing else "")
+        ).strip()
         if not doc_id:
             raise ValidationError("document_id is required")
         if body.get("buyer_approved") is False:
@@ -335,21 +339,46 @@ def handle_post_connectors(
         pp_plugin, _ = _resolve_plugins(tid)
         if body.get("strict_live") and not pp_plugin.is_live_configured:
             raise ExternalProviderError("PayPal live credentials required when strict_live=True")
+        live_request = pp_plugin.is_live_configured and not is_replay
 
         def _create_and_capture() -> dict[str, Any]:
+            if existing is not None and auto_capture and (
+                not live_request or existing.provider_mode == pp_plugin.mode_label
+            ):
+                if existing.document_id != doc_id:
+                    raise ValidationError("PayPal settlement belongs to another invoice")
+                return {"order": asdict(existing), "captured": True, "replayed": True}
             order_req = build_paypal_order_payload(state, doc_id)
             doc = state.crm.documents[doc_id]
+            remaining = doc.gross_cents - doc.paid_cents
             requested_gross = int(
-                body.get("gross_cents")
-                or (pending_entry or {}).get("amount_cents")
-                or (doc.gross_cents - doc.paid_cents)
+                (pending_entry or {}).get("amount_cents")
+                or body.get("gross_cents")
+                or remaining
             )
+            if live_request:
+                if pending_entry and pending_entry["document_id"] != doc_id:
+                    raise ValidationError("PayPal order belongs to another invoice")
+                if not 0 < requested_gross <= remaining:
+                    raise ValidationError("PayPal order amount must fit the invoice's unpaid balance")
             replay_rcpt = body.get("_replay_provider_receipt") if is_replay else None
             if isinstance(replay_rcpt, dict):
                 created = dict(replay_rcpt.get("created") or {})
                 cap = dict(replay_rcpt.get("capture") or {})
             else:
                 if explicit_oid:
+                    if live_request and not pending_entry:
+                        info = pp_plugin.get_order(explicit_oid)
+                        units = info.get("purchase_units") or []
+                        unit = units[0] if len(units) == 1 and isinstance(units[0], dict) else {}
+                        amount = unit.get("amount")
+                        if (
+                            unit.get("reference_id") != doc_id
+                            or not isinstance(amount, dict)
+                            or amount.get("currency_code") != doc.currency
+                            or parse_money_cents(amount) != requested_gross
+                        ):
+                            raise ValidationError("PayPal order does not match the invoice, currency, and amount")
                     created = dict(pending_entry) if isinstance(pending_entry, dict) else {
                         "order_id": explicit_oid,
                         "paypal_invoice_id": str(body.get("paypal_invoice_id") or f"PPINV-{explicit_oid[-12:]}"),
@@ -390,8 +419,14 @@ def handle_post_connectors(
                 if created.get("order_id"):
                     cs.pending_paypal_orders[str(created["order_id"])] = created
                 return {"order": created, "paypal_request_payload": order_req, "captured": False}
-            confirmed_gross = int(cap.get("gross_cents") or requested_gross)
-            confirmed_fee = cap.get("fee_cents") if cap.get("fee_cents") is not None else body.get("fee_cents")
+            if live_request:
+                confirmed_gross = cap["gross_cents"]
+                confirmed_fee = cap["fee_cents"]
+                captured_date = cap["captured_date"]
+            else:
+                confirmed_gross = int(cap.get("gross_cents") or requested_gross)
+                confirmed_fee = cap.get("fee_cents") if cap.get("fee_cents") is not None else body.get("fee_cents")
+                captured_date = str(cap.get("captured_date") or body.get("captured_date") or "2026-10-29")
             settled = apply_paypal_capture_to_ledger(
                 state,
                 document_id=doc_id,
@@ -400,7 +435,7 @@ def handle_post_connectors(
                 capture_id=cap["capture_id"],
                 gross_cents=confirmed_gross,
                 fee_cents=confirmed_fee,
-                captured_date=str(body.get("captured_date") or "2026-10-29"),
+                captured_date=captured_date,
                 approval_url=created.get("approval_url", ""),
                 provider_mode=str(cap.get("provider_mode") or pp_plugin.mode_label),
             )
@@ -427,6 +462,8 @@ def handle_post_connectors(
             )
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
+        if res.get("replayed"):
+            return {**json_reply(200, res), "_skip_journal": True}
         store.persist_audit_record(tid, "PAYPAL_ORDER_SETTLED" if res.get("captured") else "PAYPAL_ORDER_CREATED", doc_id, res)
         return json_reply(201, res)
 
@@ -441,6 +478,8 @@ def handle_post_connectors(
         pp_plugin=_resolve_plugins(tid)[0],
         public_origin=public_origin,
         is_replay=is_replay,
+        event=event,
+        webhook_listener_url=f"{_extract_public_origin(None)}/erp/connectors/paypal/webhook",
     )
     if ext_pp is not None:
         return ext_pp
@@ -486,70 +525,6 @@ def handle_post_connectors(
                 ),
             },
         )
-
-    if sub == "connectors/paypal/webhook":
-        if not body:
-            raise ValidationError("PayPal webhook body must not be empty")
-        event_id = str(body.get("event_id") or body.get("id") or "").strip()
-        event_type = str(body.get("event_type") or "").strip().upper()
-        tx_id = str(body.get("transmission_id") or "").strip()
-        tx_time = str(body.get("transmission_time") or "").strip()
-        webhook_id = str(body.get("webhook_id") or "").strip()
-        tx_sig = str(body.get("transmission_sig") or "").strip()
-        resource_obj = body.get("resource")
-        if (
-            not event_type
-            or not tx_id
-            or not tx_time
-            or not webhook_id
-            or not tx_sig
-            or not isinstance(resource_obj, dict)
-            or not resource_obj
-        ):
-            raise ValidationError(
-                "PayPal webhook requires non-empty event_type, transmission_id, transmission_time, webhook_id, transmission_sig, and resource"
-            )
-        dedup_key = event_id or tx_id
-        cs = get_connector_state(state)
-        if dedup_key in cs.processed_webhook_event_ids:
-            raise kd.DuplicateIdempotencyError(f"PayPal webhook '{dedup_key}' has already been processed")
-        pp_plugin, _ = _resolve_plugins(tid)
-        cert_url = str(body.get("cert_url") or "").strip()
-        auth_algo = str(body.get("auth_algo") or "").strip()
-        if cert_url and auth_algo and pp_plugin.is_live_configured and not is_replay:
-            verification = pp_plugin.verify_webhook_via_api(
-                transmission_id=tx_id,
-                transmission_time=tx_time,
-                cert_url=cert_url,
-                auth_algo=auth_algo,
-                transmission_sig=tx_sig,
-                webhook_id=webhook_id,
-                webhook_event={"id": dedup_key, "event_type": event_type, "resource": resource_obj},
-            )
-            body["_replay_provider_receipt"] = verification
-        elif is_replay and isinstance(body.get("_replay_provider_receipt"), dict):
-            verification = dict(body["_replay_provider_receipt"])
-        else:
-            raw_resource = json.dumps(resource_obj, sort_keys=True)
-            verification = kd.verify_paypal_webhook_signature(
-                raw_body=raw_resource,
-                transmission_id=tx_id,
-                transmission_time=tx_time,
-                webhook_id=webhook_id,
-                transmission_sig=tx_sig,
-            )
-        if verification.get("verification_status") != "SUCCESS":
-            raise kd.PermissionDeniedError("PayPal Webhook signature verification failed")
-        cs.processed_webhook_event_ids.add(dedup_key)
-        res_id = str(resource_obj.get("id") or "").strip()
-        if event_type == "CHECKOUT.ORDER.APPROVED" and res_id in cs.pending_paypal_orders:
-            cs.pending_paypal_orders[res_id]["status"] = "APPROVED"
-        elif event_type == "BILLING.SUBSCRIPTION.ACTIVATED" and res_id in cs.paypal_subscriptions:
-            cs.paypal_subscriptions[res_id]["status"] = "ACTIVE"
-        store.persist_audit_record(
-            tid, "PAYPAL_WEBHOOK_VERIFIED", dedup_key, {"event_id": dedup_key, "event_type": event_type, "verification": verification}
-        )
-        return json_reply(200, {"webhook_event_id": dedup_key, "webhook_event_type": event_type, "verification": verification, "routed": True})
 
     if sub == "connectors/paypal/payout":
         approval_id = str(body.get("approval_id") or "").strip()

@@ -172,7 +172,7 @@ def dispatch_http_event(
         if method == "POST":
             body = parse_json_body(event)
             resp = _handle_post(path, body=body, actor=actor, store=active_store, event=event)
-            if resp.get("statusCode") in (200, 201):
+            if not resp.pop("_skip_journal", False) and resp.get("statusCode") in (200, 201):
                 if path.endswith("/reset"):
                     active_store.write_journal_reset()
                 elif not any(

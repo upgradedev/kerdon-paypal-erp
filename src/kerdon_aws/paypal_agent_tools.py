@@ -151,9 +151,9 @@ def run_paypal_commerce_agent_workflow(
             order_id=oid,
             paypal_invoice_id=str(pending.get("paypal_invoice_id") or f"PPINV-{oid[-8:]}"),
             capture_id=cap["capture_id"],
-            gross_cents=int(cap.get("gross_cents") or gross),
+            gross_cents=cap["gross_cents"],
             fee_cents=cap.get("fee_cents"),
-            captured_date="2026-10-29",
+            captured_date=cap["captured_date"] if pp_plugin.is_live_configured else "2026-10-29",
             approval_url=str(pending.get("approval_url") or ""),
             provider_mode=cap["provider_mode"],
         )

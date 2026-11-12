@@ -543,6 +543,7 @@ def apply_paypal_capture_to_ledger(
             source_document_id=document_id,
             source_sha256=sha,
             lines=tuple(lines),
+            currency=doc.currency,
         )
     )
     state.crm.documents[document_id] = DocumentRegisterEntry(
