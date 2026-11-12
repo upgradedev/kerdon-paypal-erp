@@ -113,8 +113,13 @@ class Reader:
 
     actor: Actor
 
-    def read(self, tenant_id: str, query_fn: Callable[[], T]) -> T:
-        require_capability(self.actor, Capability.VIEW_PNL, tenant_id)
+    def read(
+        self,
+        tenant_id: str,
+        query_fn: Callable[[], T],
+        capability: Capability = Capability.VIEW_PNL,
+    ) -> T:
+        require_capability(self.actor, capability, tenant_id)
         return query_fn()
 
 

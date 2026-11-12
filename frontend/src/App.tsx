@@ -27,9 +27,10 @@ export function App() {
             ))}
           </select>
         </label>
+        <div id="sidebar-org-pill" className="org-pill"></div>
         <nav id="nav" aria-label="ERP modules"></nav>
         <div id="legacy" className="legacy">
-          Double-Entry GL · myDATA · ISO 20022
+          Sofia Marinou · Double-Entry GL · PayPal &amp; ISO 20022
         </div>
       </aside>
 
@@ -40,19 +41,12 @@ export function App() {
           </button>
           <span id="crumb">Kerdon / Dashboard</span>
           <div className="header-actions">
+            <button id="role-preview-badge" type="button" className="badge" hidden>
+              Role Preview · Reset
+            </button>
             <button id="cmd-btn" type="button" aria-label="Open command palette">
               🔍 Search Ctrl+K
             </button>
-            <label htmlFor="role-select" className="sr-only">
-              Active RBAC Role
-            </label>
-            <select id="role-select" aria-label="Active RBAC Role" defaultValue="MSP_FINOPS_DIRECTOR" style={{ fontSize: '12px', padding: '6px 10px' }}>
-              <option value="MSP_FINOPS_DIRECTOR">MSP Director: Sofia Marinou</option>
-              <option value="CLIENT_OWNER">Role: Store Owner</option>
-              <option value="ACCOUNTANT">Role: Accountant</option>
-              <option value="STORE_MANAGER">Role: Store Manager</option>
-              <option value="SELLER">Role: Seller (Restricted)</option>
-            </select>
             <label htmlFor="lang-select" className="sr-only">
               Interface language
             </label>
@@ -74,10 +68,12 @@ export function App() {
         <main>
           <div className="page-head">
             <div>
-              <div className="eyebrow">EXECUTIVE FINANCIAL OPERATIONS &amp; REAL-TIME DOUBLE-ENTRY LEDGER</div>
+              <div id="page-eyebrow" className="eyebrow">
+                EXECUTIVE FINANCIAL OPERATIONS &amp; REAL-TIME DOUBLE-ENTRY LEDGER
+              </div>
               <h1 id="title">Dashboard</h1>
-              <p id="company-name"></p>
-              <p id="j5-tagline" style={{ fontSize: '12px', margin: '2px 0 0' }}>
+              <p id="company-name" hidden></p>
+              <p id="j5-tagline" style={{ fontSize: '12px', margin: '4px 0 0' }}>
                 Kerdon turns PayPal checkouts, subscriptions, disputes, and bills into a balanced double-entry ledger, seller commissions, and Four-Eyes governed payouts.
               </p>
               <button id="shell-self-approve-guard" type="button" disabled aria-describedby="four-eyes-policy" hidden>
@@ -87,7 +83,7 @@ export function App() {
                 This action is unavailable due to Four-Eyes separation: preparer cannot approve own payout.
               </span>
             </div>
-            <div className="period">
+            <div id="period-bar" className="period">
               <label htmlFor="start">
                 From
                 <input id="start" type="date" />
@@ -141,7 +137,7 @@ export function App() {
         <label htmlFor="cmd-input" className="sr-only">
           Search modules and actions
         </label>
-        <input id="cmd-input" aria-label="Search modules and actions" placeholder="Type a module or command (e.g. Sales, Treasury, PayPal, myDATA, Inventory)..." style={{ width: '100%' }} />
+        <input id="cmd-input" aria-label="Search modules and actions" placeholder="Type a module or command (e.g. Statements, Sales, Treasury, PayPal, Inventory)..." style={{ width: '100%' }} />
         <div id="cmd-list" className="cmd-list"></div>
       </dialog>
     </>

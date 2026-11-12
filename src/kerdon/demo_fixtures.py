@@ -64,6 +64,7 @@ from .inbox import (
 from .ledger import AccountCode, FinancialEvent, GeneralLedger, LedgerLine
 from .query import FactSheet, build_fact_sheet
 from .reasoning import GapReasoning, reason_over_all_gaps
+from .statements import seed_counterparty_ledger_activity
 from .tenancy import (
     Direction,
     SalesTeam,
@@ -429,7 +430,7 @@ def _build_tenant_state(
             source_document_id=doc_sale.document_id,
             source_sha256=primary_sha,
             lines=(
-                LedgerLine(account=AccountCode.CASH_1000, debit_cents=collected),
+                LedgerLine(account=AccountCode.CASH_1000, debit_cents=collected, counterparty_id=cust_1.customer_id),
                 LedgerLine(
                     account=AccountCode.AR_1100,
                     credit_cents=collected,
@@ -437,6 +438,18 @@ def _build_tenant_state(
                 ),
             ),
         )
+    )
+    seed_counterparty_ledger_activity(
+        tenant=tenant,
+        crm=crm,
+        ledger=ledger,
+        primary_sha=primary_sha,
+        scale=scale,
+        store_id=store_a.store_id,
+        cust_2=cust_2,
+        cust_3=cust_3,
+        sup_rent=sup_rent,
+        sup_ops=sup_3,
     )
 
     payroll_doc = PayrollRegisterDoc(

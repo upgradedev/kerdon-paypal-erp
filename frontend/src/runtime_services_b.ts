@@ -302,15 +302,33 @@ export function renderServicesPartB(ctx: any, r: any, view: any): void {
         const dss = data.public_datasets || [];
         const cov = data.dataset_coverage || {};
         const covRows = cov.module_coverage || [];
+        const rbacRoles: Array<[string, string, string]> = [
+          ['MSP_FINOPS_DIRECTOR', 'MSP FinOps Director (Sofia Marinou)', 'Full multi-tenant Reader + Evaluator + Governed Writer access across all 22 modules'],
+          ['CLIENT_OWNER', 'Store / Franchise Owner', 'Full company P&L, Payroll, Commissions, Approvals & Payouts within owned organization'],
+          ['ACCOUNTANT', 'External / In-House Accountant', 'P&L, Financial Statements, GL Journal, Payroll Fusion, Statutory Tax & Close (no payout release)'],
+          ['STORE_MANAGER', 'Store Manager', 'Daily O2C/P2P operations, Inventory, Sales Targets & Commissions (no Payroll or Treasury release)'],
+          ['SELLER', 'Sales Representative (Restricted)', 'Strictly isolated to own sales & commission statements (HTTP 403 on company P&L, bank & AP)'],
+          ['PUBLIC_AUDITOR', 'External Statutory Auditor', 'Read-only inspection of Financial Statements, Trial Balance, Close & Evidence Bundle'],
+        ];
         view.innerHTML =
           facts({
             organization_country: (fprof.country_code || 'GR') + ' (' + (fprof.country_name || 'Greece') + ')',
             aade_mydata_parametric: isGreekOrg() ? 'ACTIVE (GR)' : 'INACTIVE (' + (fprof.country_code || 'INTL') + ')',
+            active_rbac_role: ctx.activeRole || 'MSP_FINOPS_DIRECTOR',
             managed_tenants: ec.managed_tenants || 35,
             monthly_labor_saved_cents: ec.monthly_labor_saved_cents || 1764000,
-            net_monthly_benefit_cents: ec.net_monthly_benefit_cents || 1885000,
             roi_multiple: ((ec.roi_multiple_x10 || 73) / 10).toFixed(1) + 'x',
           }) +
+          '<div class="section"><h3>Role-Based Access Control (RBAC) Preview &amp; Least-Privilege Matrix</h3><p>Preview how sidebar navigation, API headers (<code>X-Kerdon-Role</code>), and backend capability guards adapt per organizational role without cluttering the global top bar.</p><div class="toolbar"><label for="rbac-role-select">Active RBAC Role Preview<select id="rbac-role-select">' +
+          rbacRoles
+            .map(([code, title]) => '<option value="' + code + '"' + (ctx.activeRole === code ? ' selected' : '') + '>' + esc(title + ' (' + code + ')') + '</option>')
+            .join('') +
+          '</select></label><button type="button" id="apply-rbac-role-btn" class="primary">Apply Role Preview</button></div>' +
+          table(
+            ['Role Code', 'Persona', 'Enforced Backend & Navigation Scope'],
+            rbacRoles.map(([code, title, scope]) => ['<code>' + esc(code) + '</code>', esc(title), esc(scope)])
+          ) +
+          '</div>' +
           '<div class="section"><h3>Organization Country &amp; Parametric Statutory Fiscal Regime (GR AADE myDATA vs International Peppol)</h3><p>' +
           t(
             'All Greek AADE myDATA v1.0.8 fields (MARK, UID, E3 classifications, DOY Tax Office, GEMI Registry, 20% withholding tax, EUR 500 B2B cash limit, 17.1 Payroll myDATA, Modulo-11 TIN/AFM check) activate parametrically when the organization country is ',
@@ -440,6 +458,12 @@ export function renderServicesPartB(ctx: any, r: any, view: any): void {
             (r.fleet_summary || []).map((t: any) => [esc(t.display_name), esc(t.tier), money(t.revenue_cents), money(t.cash_balance_cents)])
           ) +
           '</div>';
+        if ($('apply-rbac-role-btn'))
+          $('apply-rbac-role-btn').onclick = async () => {
+            if ($('rbac-role-select') && ctx.setActiveRole) {
+              await ctx.setActiveRole($('rbac-role-select').value);
+            }
+          };
         if ($('save-fiscal-profile-btn'))
           $('save-fiscal-profile-btn').onclick = async () => {
             try {

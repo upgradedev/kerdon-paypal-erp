@@ -1,7 +1,9 @@
+import { mountEnterpriseGrid } from './ag_grid_bridge';
+
 let lastPayPalAgentResult: any = null;
 
 export function renderPayPalCommerceSection(ctx: any): string {
-  const { esc, money, source, table, link, data, isPayPalActive } = ctx;
+  const { esc, money, source, table, data, isPayPalActive } = ctx;
   if (!isPayPalActive()) return '';
   const cn = data.connectors || {};
   const rm = cn.runtime_modes || {};
@@ -9,7 +11,6 @@ export function renderPayPalCommerceSection(ctx: any): string {
   const isLive = Boolean(rm.paypal_credentials_present);
   const modeBadge = isLive ? 'LIVE SANDBOX (api-m.sandbox.paypal.com)' : 'SIMULATED FALLBACK';
   const pendingOrders: any[] = pp.pending_orders || [];
-  const settledOrders: any[] = pp.orders || [];
   const subs: any[] = pp.subscriptions || [];
   const webhooks: any[] = pp.webhooks || [];
   const identities: any[] = pp.identities || [];
@@ -32,20 +33,19 @@ export function renderPayPalCommerceSection(ctx: any): string {
         ['Executed Strands @tool', 'Live PayPal Resource / Diagnostic Summary'],
         (lastPayPalAgentResult.executed_tools || []).map((it: any) => {
           const res = it.result || {};
-          const summary =
-            res.order_id
-              ? 'Order ' + res.order_id + ' [' + (res.status || res.live_status || 'CREATED') + ']'
-              : res.subscription_id
-                ? 'Product ' + res.product_id + ' -> Plan ' + res.plan_id + ' -> Sub ' + res.subscription_id
-                : res.webhook_id
-                  ? 'Webhook ' + res.webhook_id + ' (' + (res.url || '') + ')'
-                  : res.payout_batch_id
-                    ? 'Payout Batch ' + res.payout_batch_id + ' [' + (res.status || '') + ']'
-                    : res.issue
-                      ? 'Fail-Closed [' + res.issue + '] debug_id=' + (res.debug_id || 'n/a')
-                      : res.app_id
-                        ? 'OAuth2 App ' + res.app_id + ' (' + (res.scopes_count || 0) + ' scopes)'
-                        : JSON.stringify(res).slice(0, 140);
+          const summary = res.order_id
+            ? 'Order ' + res.order_id + ' [' + (res.status || res.live_status || 'CREATED') + ']'
+            : res.subscription_id
+              ? 'Product ' + res.product_id + ' -> Plan ' + res.plan_id + ' -> Sub ' + res.subscription_id
+              : res.webhook_id
+                ? 'Webhook ' + res.webhook_id + ' (' + (res.url || '') + ')'
+                : res.payout_batch_id
+                  ? 'Payout Batch ' + res.payout_batch_id + ' [' + (res.status || '') + ']'
+                  : res.issue
+                    ? 'Fail-Closed [' + res.issue + '] debug_id=' + (res.debug_id || 'n/a')
+                    : res.app_id
+                      ? 'OAuth2 App ' + res.app_id + ' (' + (res.scopes_count || 0) + ' scopes)'
+                      : JSON.stringify(res).slice(0, 140);
           return ['<code>' + esc(it.tool) + '</code>', esc(summary)];
         })
       ) +
@@ -55,7 +55,7 @@ export function renderPayPalCommerceSection(ctx: any): string {
   return (
     '<div class="section" id="paypal-commerce-console">' +
     '<div class="toolbar" style="justify-content:space-between;flex-wrap:wrap;gap:8px">' +
-    '<h3>PayPal Agentic Commerce Hub (Orders v2 · Subscriptions v1 · Payouts v1 · Disputes v1 · OIDC · Strands @tool)</h3>' +
+    '<h3>PayPal Agentic Commerce Hub (Orders v2 · Subscriptions v1 · Payouts v1 · Disputes v1 · OIDC · AG Grid Studio)</h3>' +
     '<span class="badge">' +
     esc(modeBadge) +
     '</span></div>' +
@@ -85,6 +85,7 @@ export function renderPayPalCommerceSection(ctx: any): string {
     '<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:14px">' +
     '<strong>Strands Agents SDK + Amazon Bedrock PayPal Copilot (6 Executable @tool Functions)</strong>' +
     '<div class="toolbar" style="margin-top:8px;gap:8px;flex-wrap:wrap">' +
+    '<label for="paypal-agent-input" class="sr-only">PayPal AI Agent goal</label>' +
     '<input id="paypal-agent-input" aria-label="PayPal AI Agent goal" style="flex:1;min-width:150px;max-width:100%" value="Inspect Sandbox status, create a live Checkout Order v2 for the next unpaid invoice, provision a SaaS Subscription Plan v1, and diagnose Treasury Payouts">' +
     '<button type="button" id="paypal-agent-run-btn" class="primary">Run PayPal Strands Agent</button>' +
     '</div>' +
@@ -119,28 +120,13 @@ export function renderPayPalCommerceSection(ctx: any): string {
         ) +
         '</div>'
       : '') +
-    table(
-      ['Order ID', 'Invoice v2 ID', 'Capture ID', 'ERP Document', 'Gross Captured', 'PayPal Fee (6200)', 'Net Cash (1000)', 'GL Event', 'Status / Fulfillment'],
-      settledOrders.map((o: any) => [
-        '<code>' + esc(o.order_id) + '</code>',
-        '<code>' + esc(o.paypal_invoice_id) + '</code>',
-        '<code>' + esc(o.capture_id) + '</code>',
-        source(o.document_id),
-        money(o.gross_cents || 0),
-        money(o.paypal_fee_cents || 0),
-        '<strong>' + money(o.net_settled_cents || 0) + '</strong>',
-        o.journal_event_id ? link('accounting', o.journal_event_id, o.journal_event_id) : '-',
-        '<span class="badge">' +
-          esc(o.status) +
-          '</span> <button type="button" data-pp-track-cap="' +
-          esc(o.capture_id) +
-          '">+ Track DHL</button>',
-      ])
-    ) +
+    '<div id="paypal-orders-ag-grid" style="margin:10px 0"></div>' +
     '<div class="toolbar" style="justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:14px">' +
     '<strong>2. Recurring SaaS Subscriptions v1 (Catalog Product + Billing Plan + Subscription)</strong>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+    '<label for="paypal-sub-tier" class="sr-only">Subscription plan name</label>' +
     '<input id="paypal-sub-tier" aria-label="Subscription plan name" value="Kerdon Autonomous Mini-ERP Pro" style="min-width:210px">' +
+    '<label for="paypal-sub-price" class="sr-only">Monthly subscription price in EUR</label>' +
     '<input id="paypal-sub-price" aria-label="Monthly subscription price in EUR" type="number" min="10" step="1" value="149" style="max-width:95px">' +
     '<button type="button" id="paypal-create-sub-btn" class="primary">+ Provision Subscription v1</button>' +
     '</div></div>' +
@@ -192,7 +178,67 @@ export function renderPayPalCommerceSection(ctx: any): string {
 }
 
 export function bindPayPalCommerceEvents(ctx: any): void {
-  const { $, api, path, load, fail, data } = ctx;
+  const { $, esc, source, link, api, path, load, fail, bind, lang, data } = ctx;
+  const settledOrders: any[] = data.connectors?.paypal?.orders || [];
+
+  const bindTrackButtons = () => {
+    bind();
+    document.querySelectorAll('[data-pp-track-cap]').forEach((btn: any) => {
+      btn.onclick = async () => {
+        try {
+          const capId = btn.getAttribute('data-pp-track-cap');
+          const trk = 'DHL-GR-' + String(capId).slice(-6).toUpperCase();
+          await api(path('connectors/paypal/tracker'), { capture_id: capId, tracking_number: trk, carrier: 'DHL' });
+          $('notice').textContent = 'Submitted PayPal Shipment Tracker ' + trk + ' for capture ' + capId + '.';
+          await load();
+        } catch (e) {
+          fail(e);
+        }
+      };
+    });
+  };
+
+  if ($('paypal-orders-ag-grid')) {
+    mountEnterpriseGrid($('paypal-orders-ag-grid'), {
+      idPrefix: 'pp-orders',
+      lang,
+      csvFileName: 'kerdon-paypal-3line-settlements.csv',
+      primaryAmountField: 'gross_cents',
+      onRendered: bindTrackButtons,
+      columns: [
+        { field: 'order_html', headerName: 'Order ID', isHtml: true, maxWidth: 165 },
+        { field: 'inv_html', headerName: 'Invoice v2', isHtml: true, maxWidth: 165, mobileHide: true },
+        { field: 'doc_html', headerName: 'ERP Document', isHtml: true, maxWidth: 180 },
+        { field: 'gross_cents', headerName: 'Gross (1100_AR)', cents: true, sumCents: true },
+        { field: 'paypal_fee_cents', headerName: 'PayPal Fee (6200)', cents: true, sumCents: true },
+        { field: 'net_settled_cents', headerName: 'Net Cash (1000)', cents: true, sumCents: true },
+        { field: 'gl_html', headerName: 'GL Event', isHtml: true, maxWidth: 165, mobileHide: true },
+        { field: 'act_html', headerName: 'Status / Fulfillment', isHtml: true, maxWidth: 195, mobileHide: true },
+      ],
+      rows: settledOrders.map((o: any) => ({
+        ...o,
+        gross_cents: o.gross_cents || 0,
+        paypal_fee_cents: o.paypal_fee_cents || 0,
+        net_settled_cents: o.net_settled_cents || 0,
+        order_html: '<code>' + esc(o.order_id) + '</code>',
+        inv_html: '<code>' + esc(o.paypal_invoice_id || '-') + '</code>',
+        doc_html: source(o.document_id),
+        gl_html: o.journal_event_id ? link('accounting', o.journal_event_id, o.journal_event_id) : '-',
+        act_html:
+          '<span class="badge">' +
+          esc(o.status) +
+          '</span> <button type="button" data-pp-track-cap="' +
+          esc(o.capture_id) +
+          '">+ Track DHL</button>',
+      })),
+      presets: [
+        { id: 'all', label: 'All Settled Captures' },
+        { id: 'fees', label: '3-Line Fee Splits (> €0 Fee)', predicate: (r) => (r.paypal_fee_cents || 0) > 0 },
+        { id: 'high', label: 'Enterprise Invoices (> €1,000)', predicate: (r) => (r.gross_cents || 0) > 100000 },
+      ],
+    });
+  }
+
   const pickUnpaidDoc = () => {
     const unpaid = (data.records?.sales || []).find((s: any) => (s.paid_cents || 0) < (s.gross_cents || 0));
     if (!unpaid) throw Error('All sales invoices are already settled. Create a new sales invoice first.');
@@ -382,19 +428,7 @@ export function bindPayPalCommerceEvents(ctx: any): void {
     };
   });
 
-  document.querySelectorAll('[data-pp-track-cap]').forEach((btn: any) => {
-    btn.onclick = async () => {
-      try {
-        const capId = btn.getAttribute('data-pp-track-cap');
-        const trk = 'DHL-GR-' + String(capId).slice(-6).toUpperCase();
-        await api(path('connectors/paypal/tracker'), { capture_id: capId, tracking_number: trk, carrier: 'DHL' });
-        $('notice').textContent = 'Submitted PayPal Shipment Tracker ' + trk + ' for capture ' + capId + '.';
-        await load();
-      } catch (e) {
-        fail(e);
-      }
-    };
-  });
+  bindTrackButtons();
 }
 
 export async function consumePayPalOidcCallbackIfPresent(ctx: any): Promise<void> {

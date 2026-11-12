@@ -8,6 +8,11 @@ from dataclasses import asdict
 from datetime import date
 
 from .ledger import AccountCode
+from .statements import (
+    build_cash_account_statement,
+    build_cash_flow_statement,
+    compute_counterparty_ledger_balances,
+)
 
 
 def validate_period(start: str, end: str) -> None:
@@ -29,6 +34,10 @@ def party_statement(
     sign = 1 if kind == "customer" else -1
     opening = 0
     balance = 0
+    total_debit = 0
+    total_credit = 0
+    prior_activity_count = 0
+    first_date = ""
     rows = []
     for event in sorted(
         state.ledger.events, key=lambda e: (e.posted_date, e.event_id)
@@ -37,17 +46,32 @@ def party_statement(
             raise ValueError("Cross-tenant ledger event")
         if event.posted_date > end:
             continue
-        delta = sign * sum(
-            line.debit_cents - line.credit_cents
+        cp_lines = [
+            line
             for line in event.lines
             if line.account == account and line.counterparty_id == party_id
-        )
-        if not delta:
+        ]
+        if not cp_lines:
             continue
+        dr = sum(int(line.debit_cents) for line in cp_lines)
+        cr = sum(int(line.credit_cents) for line in cp_lines)
+        delta = sign * (dr - cr)
+        if not delta and not dr and not cr:
+            continue
+        if not first_date:
+            first_date = event.posted_date
         balance += delta
         if event.posted_date < start:
             opening = balance
+            prior_activity_count += 1
         else:
+            total_debit += dr
+            total_credit += cr
+            bal_side = (
+                ("DR" if balance > 0 else "CR")
+                if kind == "customer"
+                else ("CR" if balance > 0 else "DR")
+            ) if balance != 0 else "ZERO"
             rows.append(
                 {
                     "event_id": event.event_id,
@@ -55,21 +79,41 @@ def party_statement(
                     "source_document_id": event.source_document_id,
                     "source_sha256": event.source_sha256,
                     "description": event.description,
+                    "debit_cents": dr,
+                    "credit_cents": cr,
                     "increase_cents": max(0, delta),
                     "decrease_cents": max(0, -delta),
                     "balance_cents": balance,
+                    "balance_side": bal_side,
                 }
             )
+    open_side = (
+        (("DR" if opening > 0 else "CR") if kind == "customer" else ("CR" if opening > 0 else "DR"))
+        if opening != 0
+        else "ZERO"
+    )
+    close_side = (
+        (("DR" if balance > 0 else "CR") if kind == "customer" else ("CR" if balance > 0 else "DR"))
+        if balance != 0
+        else "ZERO"
+    )
     return {
         "tenant_id": state.tenant.tenant_id,
         "party_id": party_id,
         "kind": kind,
+        "gl_account": account.value,
         "start": start,
         "end": end,
         "currency": "EUR",
         "basis": "posted-ledger",
         "opening_cents": opening,
+        "opening_side": open_side,
+        "total_debit_cents": total_debit,
+        "total_credit_cents": total_credit,
         "closing_cents": balance,
+        "closing_side": close_side,
+        "prior_activity_count": prior_activity_count,
+        "first_activity_date": first_date,
         "rows": rows,
     }
 
@@ -209,10 +253,22 @@ def operational_records(state, module: str) -> list[dict]:
         meta_map = getattr(ext, "party_metadata", {}) if ext else {}
         org_prof = resolve_organization_fiscal_profile(state)
         is_gr = bool(org_prof.get("is_greek_organization", True))
+        gl_balances = compute_counterparty_ledger_balances(state)
         rows = []
         for idx, party in enumerate(registry.values(), start=1):
             pid = getattr(party, key)
             pm = meta_map.get(pid, {})
+            gl_info = gl_balances.get(pid, {})
+            if module == "customers":
+                dr_c = int(gl_info.get("ar_debit_cents", 0))
+                cr_c = int(gl_info.get("ar_credit_cents", 0))
+                net_c = dr_c - cr_c
+                side = "DR" if net_c > 0 else ("CR" if net_c < 0 else "ZERO")
+            else:
+                dr_c = int(gl_info.get("ap_debit_cents", 0))
+                cr_c = int(gl_info.get("ap_credit_cents", 0))
+                net_c = cr_c - dr_c
+                side = "CR" if net_c > 0 else ("DR" if net_c < 0 else "ZERO")
             p_country = str(pm.get("country_code") or (org_prof["country_code"] if is_gr else "DE")).upper()
             row = {
                 **asdict(party),
@@ -223,6 +279,12 @@ def operational_records(state, module: str) -> list[dict]:
                 "city": pm.get("city", "Athens" if p_country == "GR" else "Berlin"),
                 "postal_code": pm.get("postal_code", "10563" if p_country == "GR" else "10117"),
                 "afm_validation": validate_greek_afm(party.tax_id) if (is_gr and p_country == "GR") else None,
+                "ledger_debit_cents": dr_c,
+                "ledger_credit_cents": cr_c,
+                "ledger_balance_cents": net_c,
+                "ledger_abs_balance_cents": abs(net_c),
+                "ledger_balance_side": side,
+                "ledger_movement_count": int(gl_info.get("movement_count", 0)),
                 **pm,
                 "id": pid,
             }
@@ -539,6 +601,21 @@ def profitability_and_cash_forecast(state, start: str, end: str) -> dict:
 
     expected_inflows = ar_total
     expected_outflows = aging["payables_aging"]["total_open_cents"]
+    period_days = max(1, (date.fromisoformat(end) - date.fromisoformat(start)).days + 1)
+    period_sales_gross = sum(
+        d.gross_cents for d in sales_docs if start <= d.issued_date <= end
+    )
+    purch_docs = [
+        d for d in docs.values()
+        if d.direction.value == "PURCHASE_EXPENSE" and start <= d.issued_date <= end
+    ]
+    period_purch_gross = sum(d.gross_cents for d in purch_docs)
+    dso_days = round((ar_now / max(1, period_sales_gross)) * period_days, 1) if period_sales_gross > 0 else 0.0
+    dpo_days = round((ap_now / max(1, period_purch_gross)) * period_days, 1) if period_purch_gross > 0 else 0.0
+    ias7_cf = build_cash_flow_statement(state, start, end)
+    cash_card = build_cash_account_statement(state, start, end)
+    quick_ratio_val = round((cash_now + ar_now) / max(1, total_liabilities), 2)
+    current_ratio_val = round(total_assets / max(1, total_liabilities), 2)
     return {
         "start": start,
         "end": end,
@@ -577,6 +654,8 @@ def profitability_and_cash_forecast(state, start: str, end: str) -> dict:
             "total_liabilities_and_equity_cents": total_liabilities + cum_net_income,
             "balanced": total_assets == (total_liabilities + cum_net_income),
         },
+        "cash_flow_statement": ias7_cf,
+        "cash_account_statement": cash_card,
         "vat_return": {
             "output_vat_2400_cents": vat_out_now,
             "input_vat_1400_cents": vat_in_now,
@@ -591,7 +670,11 @@ def profitability_and_cash_forecast(state, start: str, end: str) -> dict:
             "collection_rate_pct": collection_rate_pct,
             "overdue_ar_pct": overdue_ar_pct,
             "working_capital_cents": total_assets - total_liabilities,
-            "quick_ratio_x": round((cash_now + ar_now) / max(1, ap_now), 2),
+            "quick_ratio_x": quick_ratio_val,
+            "current_ratio_x": current_ratio_val,
+            "dso_days": dso_days,
+            "dpo_days": dpo_days,
+            "operating_cash_flow_cents": ias7_cf["operating_activities"]["net_operating_cash_cents"],
         },
         "cash_forecast": {
             "opening_posted_cash_cents": cash_now,

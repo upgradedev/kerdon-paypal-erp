@@ -3,17 +3,18 @@
 [![CI](https://github.com/upgradedev/kerdon-paypal-erp/actions/workflows/ci.yml/badge.svg)](https://github.com/upgradedev/kerdon-paypal-erp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Live PayPal Developer Platform (`api-m.sandbox.paypal.com`) + Strands Agents SDK (`@tool`) + Deterministic Double-Entry General Ledger**
+**Live PayPal Developer Platform (`api-m.sandbox.paypal.com`) + Strands Agents SDK (`@tool`) + AG Grid v33 Financial Studio + Deterministic Double-Entry General Ledger**
 
 **Kerdon turns PayPal checkouts, subscriptions, disputes, and bills into a balanced double-entry ledger, seller commissions, and Four-Eyes governed payouts.**
 
 - **Live Deployed PayPal Agentic Commerce Console:** https://d175u4e48xuu3p.cloudfront.net/#module=paypal
+- **Live 7-Tab Financial Statements & AG Grid Studio:** https://d175u4e48xuu3p.cloudfront.net/#module=statements
 - **Live CloudFront Root SPA:** https://d175u4e48xuu3p.cloudfront.net/
 - **Live HTTP API v2 Endpoint:** https://m9tqxoatqa.execute-api.eu-west-1.amazonaws.com/Prod/
 
-Kerdon PayPal Edition turns multi-store SMB and financial back-office operations into a governed Agentic Commerce loop. Instead of letting an LLM guess balances or trigger unchecked payouts, Kerdon pairs a **6-tool Strands Agents SDK + Amazon Bedrock Nova Pro copilot** (`src/kerdon_aws/paypal_agent_tools.py`) with a **zero-SDK deterministic integer-cent System of Record** (`src/kerdon/`) and **8 live PayPal Developer Platform capabilities** (`src/kerdon_aws/paypal_live_client.py`).
+Kerdon PayPal Edition turns multi-store SMB and financial back-office operations into a governed Agentic Commerce loop. Instead of letting an LLM guess balances or trigger unchecked payouts, Kerdon pairs a **6-tool Strands Agents SDK + Amazon Bedrock Nova Pro copilot** (`src/kerdon_aws/paypal_agent_tools.py`) with a **zero-SDK deterministic integer-cent System of Record** (`src/kerdon/`), **8 live PayPal Developer Platform capabilities** (`src/kerdon_aws/paypal_live_client.py`), and an **AG Grid v33 + AG Charts v11 Enterprise Financial Studio** (`frontend/src/ag_grid_bridge.ts`).
 
-> **Core Problem & Named Persona (`Sofia Marinou`, FinOps Director):** Multi-store merchants and financial back-offices lose margin and audit integrity across disconnected PayPal checkouts, unbooked payment processing fees, chargeback disputes, seller commission clawbacks, and manual batch disbursements. Sofia Marinou uses Kerdon to create live PayPal `Orders v2`, reconcile `seller_receivable_breakdown` fees into balanced 3-line General Ledger entries (`1000_CASH + 6200_OPEX = 1100_AR`), provision recurring SaaS `Subscriptions v1`, assemble SHA-256 `Disputes v1` evidence packets, link verified merchant identities via `Log in with PayPal` (OIDC v1.1), and enforce Four-Eyes Segregation of Duties on `Batch Payouts v1`.
+> **Core Problem & Named Persona (`Sofia Marinou`, FinOps Director):** Multi-store merchants and financial back-offices lose margin and audit integrity across disconnected PayPal checkouts, unbooked payment processing fees, chargeback disputes, seller commission clawbacks, and manual batch disbursements. Sofia Marinou uses Kerdon to create live PayPal `Orders v2`, reconcile `seller_receivable_breakdown` fees into balanced 3-line General Ledger entries (`1000_CASH + 6200_OPEX = 1100_AR`), inspect IAS 7 Cash Flow and Counterparty `DR`/`CR` Account Cards in AG Grid, provision recurring SaaS `Subscriptions v1`, assemble SHA-256 `Disputes v1` evidence packets, link verified merchant identities via `Log in with PayPal` (OIDC v1.1), and enforce Four-Eyes Segregation of Duties on `Batch Payouts v1`.
 
 ---
 
@@ -32,11 +33,22 @@ Kerdon PayPal Edition turns multi-store SMB and financial back-office operations
 
 ---
 
-## 2. System Architecture & Agentic Commerce Flow
+## 2. Prize Track Alignment & Sponsor Technology Showcase (`Build What's Next with PayPal and AI`)
+
+| Prize Category | What Kerdon Demonstrates Live | Code & Live Evidence |
+|---|---|---|
+| **1st Place & Best Use of PayPal + AI** | 8 live PayPal Sandbox APIs orchestrated by a 6-tool Strands + Bedrock Nova Pro agent (`@tool`), backed by persistent AgentCore Memory and 4-way cent-exact double-entry GL reconciliation (`Dashboard == Balance Sheet == IAS 7 Cash Flow == Cash & PayPal Card`). | `src/kerdon_aws/paypal_live_client.py`, `src/kerdon_aws/paypal_agent_tools.py`, `/#module=paypal` |
+| **Best Use of Agentic Commerce** | End-to-end autonomous merchant commerce loop (`Detect -> Reason -> Draft Fix -> Four-Eyes Governed Settlement`): 2-step `Orders v2` with 3-line fee accounting, recurring `Subscriptions v1`, autonomous `Disputes v1` + `DHL` tracking defense packets, and `Batch Payouts v1`. | `src/kerdon_aws/paypal_routes.py`, `src/kerdon/treasury.py`, `src/kerdon/commissions.py` |
+| **Best Use of AG Grid** | Open-source MIT **`ag-grid-community` (`v33.1.1`)** + **`ag-charts-community` (`v11.1.0`)** powering Kerdon's **AI Grid Studio**: natural-language/threshold query bar (`> 1000`, `open`, `DR`, `PayPal`, `top`), 1-click Smart Financial View chips, custom WCAG-AA Quartz dark/light theme, CSV export, and live-recalculating **`pinnedBottomRowData` Grand Totals** across PayPal 3-line fee splits, IAS 7 Cash Flow, Trial Balance, Counterparty `DR`/`CR` Cards, AR/AP Aging, and Operational Ledgers (`0` `axe-core` violations). | `frontend/src/ag_grid_bridge.ts`, `frontend/src/runtime_statements.ts`, `frontend/src/runtime_paypal.ts`, `/#module=statements` |
+| **Most Creative** | Cryptographic **SHA-256 Changed-Evidence Payout Invalidation** (`HTTP 409 Conflict` automatically voiding stale supplier payout approvals the instant late credit note `CN-99` lands), **3-Document Payroll Fusion**, and **Spoken + Grade-1 ASCII Braille Aletheia Merkle Receipts** for screen-reader and Braille display operators. | `src/kerdon/treasury.py`, `src/kerdon/docgen.py`, `src/kerdon/fiscal.py` |
+
+---
+
+## 3. System Architecture & Agentic Commerce Flow
 
 ```mermaid
 flowchart LR
-    U["Sofia Marinou (React 18 + TypeScript SPA)"] --> CF["CloudFront CDN + S3 OAC"]
+    U["Sofia Marinou (React 18 + AG Grid v33 SPA)"] --> CF["CloudFront CDN + S3 OAC"]
     CF --> APIGW["HTTP API Gateway v2"]
     APIGW --> R["Reader Lambda (Read-Only)"]
     APIGW --> E["Evaluator Lambda (Bedrock Only)"]
@@ -51,7 +63,7 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant Buyer as Buyer / Operator
-    participant UI as Kerdon SPA (#module=paypal)
+    participant UI as Kerdon SPA (#module=paypal + AG Grid)
     participant Agent as Strands @tool Agent (Writer)
     participant PayPal as api-m.sandbox.paypal.com
     participant GL as Pure Domain Double-Entry GL
@@ -65,16 +77,16 @@ sequenceDiagram
     Agent->>PayPal: POST /v2/checkout/orders/{id}/capture
     PayPal-->>Agent: COMPLETED + seller_receivable_breakdown (gross, fee, net)
     Agent->>GL: apply_paypal_capture_to_ledger (integer cents)
-    GL-->>UI: Balanced 3-Line Journal (1000_CASH + 6200_OPEX = 1100_AR)
+    GL-->>UI: AG Grid 3-Line Split + Pinned Totals (1000_CASH + 6200_OPEX = 1100_AR)
 ```
 
 ---
 
-## 3. Repository Structure & Verification Suite
+## 4. Repository Structure & Verification Suite
 
-- `src/kerdon/`: Pure Python 3.12 Hexagonal Domain Core (zero cloud, network, or LLM SDK imports, enforced by AST Gate `A5` in `scripts/verify_gates.py`). Includes `src/kerdon/paypal_schema.py`, `src/kerdon/connectors.py`, `src/kerdon/ledger.py`, `src/kerdon/treasury.py`, and `src/kerdon/commissions.py`.
+- `src/kerdon/`: Pure Python 3.12 Hexagonal Domain Core (`29` modules, zero cloud, network, or LLM SDK imports, enforced by AST Gate `A5` in `scripts/verify_gates.py`). Includes `src/kerdon/paypal_schema.py`, `src/kerdon/statements.py` (IAS 7 Cash Flow & `DR`/`CR` Account Cards), `src/kerdon/connectors.py`, `src/kerdon/ledger.py`, `src/kerdon/treasury.py`, and `src/kerdon/commissions.py`.
 - `src/kerdon_aws/`: Serverless AWS & PayPal adapters (`src/kerdon_aws/paypal_live_client.py`, `src/kerdon_aws/paypal_agent_tools.py`, `src/kerdon_aws/paypal_routes.py`, `src/kerdon_aws/connectors_adapter.py`, `src/kerdon_aws/handlers.py`).
-- `frontend/`: React 18 + TypeScript + Vite 5 + Tailwind CSS 3 SPA including the interactive PayPal Agentic Commerce Console (`frontend/src/runtime_paypal.ts`).
+- `frontend/`: React 18 + TypeScript + Vite 5 + Tailwind CSS 3 + `ag-grid-community` v33 + `ag-charts-community` v11 SPA including the PayPal Agentic Commerce Console (`frontend/src/runtime_paypal.ts`), the 7-tab Financial Statements Hub (`frontend/src/runtime_statements.ts`), and the AG Grid Studio bridge (`frontend/src/ag_grid_bridge.ts`).
 - `infra/template.yaml`: Isolated AWS SAM template (`kerdon-paypal-*`) with `NoEcho` `PayPalClientId` and `PayPalClientSecret` parameters, Least-Privilege `Reader` / `Evaluator` / `Writer` Lambdas, DynamoDB PITR/SSE, S3 OAC + CloudFront, and `AWS::BedrockAgentCore::Memory`.
 
 ### Local Verification Commands
@@ -89,18 +101,18 @@ PYTHONPATH=src python scripts/uat_smoke.py
 
 ---
 
-## 4. Responsible AI & EU AI Act Governance Mapping
+## 5. Responsible AI & EU AI Act Governance Mapping
 
 | EU AI Act Reference | Architectural Control in Kerdon PayPal Edition | Verification Artifact |
 |---|---|---|
 | **Article 10** (Data Governance) | 100% deterministic integer-cent arithmetic (`Decimal` / cents) with synthetic multi-tenant fixtures and SHA-256 provenance. | `src/kerdon/demo_fixtures.py`, `scripts/run_erp_benchmark.py` (`90/90` cases) |
-| **Article 13** (Transparency) | Explicit runtime channel disclosure (`paypal-sandbox-live` vs `paypal-sandbox-simulated`) plus upstream PayPal `debug_id` diagnostics. | `src/kerdon_aws/paypal_live_client.py`, `GET /erp/connectors` |
+| **Article 13** (Transparency) | Explicit runtime channel disclosure (`paypal-sandbox-live` vs `paypal-sandbox-simulated`), `i` IFRS/GAAP KPI formula tooltips, and upstream PayPal `debug_id` diagnostics. | `src/kerdon_aws/paypal_live_client.py`, `frontend/src/kpi_catalog.ts` |
 | **Article 14** (Human Oversight) | Structural Four-Eyes Segregation of Duties (`approver_id != executor_id`) and SHA-256 Changed-Evidence invalidation before any PayPal Batch Payout. | `src/kerdon/treasury.py`, `scripts/security_audit.py` (`SEC-09`) |
 | **Article 15** (Accuracy & Cybersecurity) | Fail-closed `ExternalProviderError` (`HTTP 502`), `16 KB` payload cap (`HTTP 413`), Least-Privilege 3-Lambda IAM separation, and OWASP API Top-10 suite. | `scripts/security_audit.py` (`10/10` controls), `tests/test_paypal_live_suite.py` |
 | **Article 50** (AI Output Labelling) | Every Strands/Bedrock narrative and `@tool` execution trace is tagged with exact model ID (`eu.amazon.nova-pro-v1:0`) and tool outputs. | `src/kerdon_aws/paypal_agent_tools.py`, `frontend/src/runtime_paypal.ts` |
 
 ---
 
-## 5. Clean-Room & Open-Source Disclosure
+## 6. Clean-Room & Open-Source Disclosure
 
 Built in public MIT repository `upgradedev/kerdon-paypal-erp` on isolated AWS stack `kerdon-paypal-dev` (`infra/template.yaml`, `infra/deploy-policy.json`) with live PayPal Developer Sandbox integration (`https://api-m.sandbox.paypal.com`) and 100% synthetic business entities. Further design details are documented in `docs/HLD.md`, `docs/DEVPOST.md`, `docs/ERP_WORKSPACE.md`, and `docs/GTM_PLAYBOOK.md`.

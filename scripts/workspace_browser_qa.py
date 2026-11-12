@@ -96,9 +96,14 @@ async def main():
   await page.locator('#target-input').fill('5000.00')
   await page.get_by_role('button',name='Compare',exact=True).click()
   await page.get_by_text('€5,000.00',exact=True).wait_for()
-  for name in ['Accounting','Treasury','Close & completeness','Commissions','Inventory','Documents & evidence','Workforce','Subscription & fleet']:
+  for name in ['Financial statements','Accounting','Treasury','Close & completeness','Commissions','Inventory','Documents & evidence','Workforce','Subscription & fleet']:
    await page.get_by_role('link',name=name,exact=True).click()
    await page.wait_for_timeout(150)
+   if name=='Financial statements':
+    await check_axe(page,axe_js,'1280px-statements-ag-grid')
+    assert await page.locator('#period-bar').is_visible()
+   if name=='Inventory':
+    assert not await page.locator('#period-bar').is_visible()
    if name=='Documents & evidence':
     await page.locator('#paypal-commerce-console').wait_for(timeout=15000)
     await page.locator('#paypal-verify-btn').click()

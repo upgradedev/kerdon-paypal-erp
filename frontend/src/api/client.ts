@@ -2,6 +2,7 @@ import { ModuleKey } from '../types/erp';
 
 export const MODULES: Record<ModuleKey, string> = {
   dashboard: 'Dashboard',
+  statements: 'Financial statements',
   customers: 'Customers',
   suppliers: 'Suppliers',
   sales: 'Sales',
@@ -22,7 +23,7 @@ export const MODULES: Record<ModuleKey, string> = {
 };
 
 export const NAVIGATION_GROUPS: [string, ModuleKey[]][] = [
-  ['Overview & Intelligence', ['dashboard', 'intelligence']],
+  ['Overview & Intelligence', ['dashboard', 'statements', 'intelligence']],
   ['Order-to-Cash (AR)', ['customers', 'sales', 'receipts']],
   ['Procure-to-Pay (AP)', ['suppliers', 'purchases', 'expenses', 'payments']],
   ['Sales & Commissions', ['targets', 'commissions']],
@@ -32,12 +33,13 @@ export const NAVIGATION_GROUPS: [string, ModuleKey[]][] = [
 ];
 
 export const MODULE_BOUNDED_CONTEXT: Record<ModuleKey, { code: string; name: string; standard: string }> = {
-  dashboard: { code: 'BC-FP&A', name: 'Overview & Intelligence', standard: 'IFRS 18 / APQC 9.1 Dual-Basis FP&A' },
+  dashboard: { code: 'BC-FP&A', name: 'Overview & Intelligence', standard: 'IFRS 18 / APQC 9.1 Executive CFO Cockpit' },
+  statements: { code: 'BC-FP&A', name: 'Overview & Intelligence', standard: 'IFRS 18 P&L · Balance Sheet · IAS 7 Cash Flow · Account Cards' },
   intelligence: { code: 'BC-FP&A', name: 'Overview & Intelligence', standard: 'ADR-041 Grounded Fact-Sheet NL Query' },
-  customers: { code: 'BC-O2C', name: 'Order-to-Cash (AR)', standard: 'OASIS UBL 2.1 AccountingCustomerParty' },
+  customers: { code: 'BC-O2C', name: 'Order-to-Cash (AR)', standard: 'OASIS UBL 2.1 AccountingCustomerParty & AR Subledger' },
   sales: { code: 'BC-O2C', name: 'Order-to-Cash (AR)', standard: 'EN 16931 / Peppol BIS Billing 3.0 (380/381)' },
   receipts: { code: 'BC-O2C', name: 'Order-to-Cash (AR)', standard: 'ISO 20022 camt.053 CRDT Remittance' },
-  suppliers: { code: 'BC-P2P', name: 'Procure-to-Pay (AP)', standard: 'OASIS UBL 2.1 AccountingSupplierParty' },
+  suppliers: { code: 'BC-P2P', name: 'Procure-to-Pay (AP)', standard: 'OASIS UBL 2.1 AccountingSupplierParty & AP Subledger' },
   purchases: { code: 'BC-P2P', name: 'Procure-to-Pay (AP)', standard: 'ADR-030 Fiscal Identity Sign Classification' },
   expenses: { code: 'BC-P2P', name: 'Procure-to-Pay (AP)', standard: 'ICDAR SROIE / CORD Operating Expense Schema' },
   payments: { code: 'BC-P2P', name: 'Procure-to-Pay (AP)', standard: 'ISO 20022 pain.001 DBIT Disbursement' },
@@ -47,7 +49,7 @@ export const MODULE_BOUNDED_CONTEXT: Record<ModuleKey, { code: string; name: str
   accounting: { code: 'BC-R2R', name: 'Record-to-Report (GL & Tax)', standard: 'ADR-012 Double-Entry GL & Trial Balance' },
   close: { code: 'BC-R2R', name: 'Record-to-Report (GL & Tax)', standard: 'ADR-023/024/042 24-Rule Completeness & GapReasoner' },
   workforce: { code: 'BC-R2R', name: 'Record-to-Report (GL & Tax)', standard: 'ADR-031 3-Document Payroll Fusion (Register + APD + FMY)' },
-  documents: { code: 'BC-R2R', name: 'Record-to-Report (GL & Tax)', standard: 'ADR-022/028/048 Evidence Inbox, DocGen & AADE myDATA v1.0.8' },
+  documents: { code: 'BC-R2R', name: 'Record-to-Report (GL & Tax)', standard: 'ADR-022/028/048 Evidence Inbox, DocGen & Statutory Tax' },
   treasury: { code: 'BC-TRM', name: 'Treasury & Governance', standard: 'ISO 20022 Multi-Currency Treasury & Stale-Approval Guard' },
   billing: { code: 'BC-TRM', name: 'Treasury & Governance', standard: 'ADR-044/052 Multi-Tenant RBAC, Connectors & Public Datasets' },
 };
@@ -57,6 +59,7 @@ const svg = (paths: string) =>
 
 export const MODULE_ICONS: Record<ModuleKey, string> = {
   dashboard: svg('<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>'),
+  statements: svg('<path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-6"/><path d="M17 10h3v3"/>'),
   intelligence: svg('<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/><path d="M5 3v4"/><path d="M3 5h4"/><path d="M19 17v4"/><path d="M17 19h4"/>'),
   customers: svg('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
   sales: svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/>'),

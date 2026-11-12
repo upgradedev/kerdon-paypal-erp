@@ -2,24 +2,30 @@
 
 **Kerdon turns PayPal checkouts, subscriptions, disputes, and bills into a balanced double-entry ledger, seller commissions, and Four-Eyes governed payouts.**
 
-Built for **Sofia Marinou, FinOps and Multi-Tenant Back-Office Director at a 35-client AWS Managed Service Provider (MSP)**, the canonical CloudFront root `/` React 18 + TypeScript + Vite + Tailwind SPA exposes all 18 operational modules, JWT-bound `/erp/*` routing, pluggable payment and statutory tax connectors, and the Go-To-Market (GTM) & AWS Marketplace SaaS Launchpad on `main`.
+Built for **Sofia Marinou, FinOps and Multi-Tenant Back-Office Director at a 35-client AWS Managed Service Provider (MSP)**, the canonical CloudFront root `/` React 18 + TypeScript + Vite + Tailwind + AG Grid v33 SPA exposes all 19 operational modules (including the dedicated 7-tab `Financial statements` & Counterparty `DR`/`CR` Cards hub), JWT-bound `/erp/*` routing, pluggable payment and statutory tax connectors, and the Go-To-Market (GTM) & AWS Marketplace SaaS Launchpad on `main`.
 
 ---
 
 ## 1. Delivered & Shipped Capabilities (`main`)
 
-1. **Single Canonical React 18 Operations SPA (`/`):**
-   - CloudFront CDN (`SpaRewriteFunction` on `S3WebOrigin`) serves the 18-module React 18 Operations SPA at `/` (`src/kerdon_aws/workspace_ui.py`) and enforces edge `301` canonical redirects from legacy `/workspace` and `/cockpit` paths without intercepting API Gateway `403`/`404` JSON error responses.
+1. **Single Canonical React 18 + AG Grid v33 Operations SPA (`/`):**
+   - CloudFront CDN (`SpaRewriteFunction` on `S3WebOrigin`) serves the 19-module React 18 Operations SPA at `/` (`src/kerdon_aws/workspace_ui.py`) and enforces edge `301` canonical redirects from legacy `/workspace` and `/cockpit` paths without intercepting API Gateway `403`/`404` JSON error responses.
+   - Contextual `#period-bar` date filtering appears exclusively on period-analytical views (`dashboard`, `statements`, `accounting`, `sales`, `purchases`, `receipts`, `payments`, `expenses`, `targets`, and counterparty `Account statement` / `Statistics` tabs) and stays hidden on master-data and operational views.
+   - RBAC Role Preview & Least-Privilege Matrix lives inside `#module=billing` (`Subscription & fleet`) with dynamic per-role sidebar filtering and a resettable `#role-preview-badge` chip.
    - `BASE_PATH` resolution handles both CloudFront root `/` and API Gateway `/Prod/` stages cleanly, and aliases `#module=commercial` directly to `#module=billing` (`Subscription & fleet`).
-2. **Production Identity & Per-Organization RBAC (`src/kerdon_aws/identity.py`):**
+2. **Enterprise Financial Statements Hub, 4-Way Reconciliation & AG Grid Studio (`src/kerdon/statements.py`, `frontend/src/ag_grid_bridge.ts`, `frontend/src/runtime_statements.ts`):**
+   - Dedicated `#module=statements` (`Financial statements`) hub renders 7 reconciled financial views: `Income Statement (P&L)`, `Balance Sheet`, `Cash Flow Statement (IAS 7 Direct Method)`, `Account Statements (Cards)` (`1000_CASH` Cash & PayPal Ledger + Customer & Supplier `DR`/`CR` running cards), `Trial Balance`, `AR & AP Aging`, and `VAT Return (F2)`.
+   - Every KPI tile and financial ratio (`Operating EBITDA`, `Gross Profit Margin`, `Operating Cash Flow (IAS 7)`, `Quick Ratio`, `Current Ratio`, `Net Working Capital`, `DSO / DPO`) carries an accessible `i` (`info-tip`) formula tooltip and right-aligned `tabular-nums` currency formatting.
+   - Open-source MIT `ag-grid-community` (`v33`) and `ag-charts-community` (`v11`) power an AI Grid Studio Command Bar with natural-language threshold queries, smart filter chips, custom WCAG-AA Quartz dark/light themes, and live-recalculating `pinnedBottomRowData` Grand Totals.
+3. **Production Identity & Per-Organization RBAC (`src/kerdon_aws/identity.py`):**
    - Server-managed `SubjectMembershipRegistry` maps verified JWT `sub` claims (API Gateway HTTP API v2 `requestContext.authorizer.jwt.claims` or signed HS256 `Authorization: Bearer <jwt>`) to `Actor`, `Role`, `allowed_tenant_ids`, `org_roles`, and `seller_id`.
    - Fails closed in strict mode (`KERDON_AUTH_MODE=strict` or `x-kerdon-auth-mode: strict`): ignores spoofed `x-kerdon-role` / `x-kerdon-actor` client headers, returns `HTTP 401` on unauthenticated calls, and enforces seller-to-seller privacy isolation on `GET /tenants/{id}/commissions/seller-statement`.
    - Separates synthetic demo fixtures from production onboarding (`build_empty_tenant_state` in `src/kerdon/demo_fixtures.py`) and supports balanced Day-1 cutover via `POST /tenants/{id}/onboarding/opening-balance` (`src/kerdon/gtm_marketplace.py`).
-3. **Zero-Scan Persistence & Atomic Unit of Work (`src/kerdon_aws/persistence.py`, `src/kerdon/uow.py`):**
+4. **Zero-Scan Persistence & Atomic Unit of Work (`src/kerdon_aws/persistence.py`, `src/kerdon/uow.py`):**
    - Zero suppressed storage errors (`PersistenceError` -> `HTTP 503`, `VersionConflictError` -> `HTTP 409`), paginated DynamoDB journal replay (`LastEvaluatedKey`), side-effect-free journal hydration (`replay_journal_entries`), `TransactWriteItems` atomic commits with Transactional Outbox (`OUTBOX#obx-*`), and SHA-256 verified tenant backup/restore.
-4. **Commercial ERP Documents, Allocations & Aging (`src/kerdon/erp_services.py`, `src/kerdon/operational.py`):**
+5. **Commercial ERP Documents, Allocations & Aging (`src/kerdon/erp_services.py`, `src/kerdon/operational.py`):**
    - Validated customer/supplier CRUD (`POST /tenants/{id}/parties`), Four-Eyes drafts (`POST /tenants/{id}/drafts`), multi-line mixed-VAT (`0%`, `6%`, `13%`, `24%`) sales and purchase invoices (`POST /tenants/{id}/invoices`), direct expenses (`POST /tenants/{id}/expenses`), document reversals (`POST /tenants/{id}/invoices/{doc_id}/reverse`), cash receipts/payments with allocations (`POST /tenants/{id}/receipts`, `POST /tenants/{id}/payments`), and AR/AP due-date aging + 30-day cash forecasts (`GET /tenants/{id}/operations`).
-5. **Live Bedrock AI Document Auto-Fill, Pluggable Connectors & AWS Marketplace Metering:**
+6. **Live Bedrock AI Document Auto-Fill, Pluggable Connectors & AWS Marketplace Metering:**
    - `POST /erp/ai/extract-document` and `POST /tenants/{id}/ai/extract-document` route to `EvaluatorFunction`, combining deterministic integer-cent line math (`src/kerdon/uow.py`) with live **Strands + Amazon Bedrock (`eu.amazon.nova-pro-v1:0`)** counterparty/header enrichment (`extract_document_with_bedrock` in `src/kerdon_aws/bedrock_adapter.py`).
    - Pluggable Payment (`NONE`, `BANK_IBAN`, `PAYPAL`, `STRIPE`) and Statutory Tax (`NONE`, `AADE_MYDATA` REST v1.0.8 `InvoicesDoc` XML, `PEPPOL_EU` BIS Billing 3.0) connectors include runtime redacted credential configuration (`POST /tenants/{id}/connectors/config`) and fail-closed live readiness probes (`POST /tenants/{id}/connectors/verify`).
    - AWS Marketplace SaaS onboarding (`POST /gtm/marketplace/resolve-customer`), usage metering (`POST /gtm/marketplace/meter-usage`), and 6-pillar production readiness (`GET /gtm/readiness`) power the `#module=billing` Launchpad.
@@ -69,8 +75,8 @@ PYTHONPATH=src python scripts/security_audit.py
 PYTHONPATH=src python scripts/uat_smoke.py
 ```
 
-- [x] `59/59` unit, hexagonal port-swap, security, and GTM Marketplace tests pass across `8` test modules (`src/kerdon/` has `28` pure domain modules with `0` cloud/LLM SDK imports).
-- [x] `108/108` local (`111/111` live AWS) HTTP API v2 UAT smoke and adversarial boundary checks (`scripts/uat_smoke.py`) pass.
+- [x] `64/64` unit, 4-way statement/counterparty reconciliation, hexagonal port-swap, security, and GTM Marketplace tests pass across `8` test modules (`src/kerdon/` has `29` pure domain modules with `0` cloud/LLM SDK imports).
+- [x] `109/109` local (`111/111` live AWS) HTTP API v2 UAT smoke and adversarial boundary checks (`scripts/uat_smoke.py`) pass.
 - [x] `10/10` readiness gates (`scripts/verify_gates.py`), `5/5` negative `--self-test` failure proofs, and `10/10` OWASP/IAM `SEC-01..SEC-10` controls (`scripts/security_audit.py`) pass.
 - [x] Every `.py`, `.ts`, and `.tsx` source file in `src/`, `scripts/`, `tests/`, and `frontend/src/` is `<= 800` lines (`Gate A1`).
 
@@ -78,7 +84,7 @@ PYTHONPATH=src python scripts/uat_smoke.py
 
 ## 5. 3-Minute Demo Video Storyboard (`kerdon.ai`)
 
-1. **`0:00 - 0:25` Framing & Live CloudFront SPA (`/`):** Introduce multi-store merchant commerce reconciliation pain and show the live Operations Dashboard (`https://d175u4e48xuu3p.cloudfront.net/`), highlighting deterministic integer-cent KPIs paired with live **Strands AI** narration.
+1. **`0:00 - 0:25` Framing & Live CloudFront SPA (`/`):** Introduce Sofia Marinou's 35-client MSP back-office pain and show the live Operations Dashboard (`https://d175u4e48xuu3p.cloudfront.net/`), highlighting deterministic integer-cent KPIs paired with live **Amazon Bedrock Nova Pro** narration.
 2. **`0:25 - 1:10` Autonomous Email Intake, Live Bedrock Auto-Fill & 8-Stage Close:** Trigger `⚡ Autonomous Email Ingest` (`docs@aegean-mobility.kerdon.ai`), open the Sales/Purchases drawer `#ai-autofill-btn` (`strands-bedrock:eu.amazon.nova-pro-v1:0`), and run `1. Close Run` -> `2. Four-Eyes Approve` -> `3. Export Pack` backed by `AWS::BedrockAgentCore::Memory` (`kerdon_msp_memory`).
 3. **`1:10 - 2:05` Multi-Organization RBAC, AADE myDATA XML, PayPal & GTM Launchpad:** Open `Subscription & fleet` (`/#module=billing`) to show per-organization collaborator RBAC (`org_roles`), balanced Opening Trial-Balance Cutover, AWS Marketplace `ResolveCustomer`/`BatchMeterUsage`, and country-parametric **AADE myDATA v1.0.8 `InvoicesDoc` XML** (`MARK` + `E3`).
 4. **`2:05 - 3:00` Changed-Evidence Payout Invalidation & Aletheia Braille Receipt:** Inject late Supplier Credit Note `CN-99` (`EUR 310.00`), show stale supplier payout approval `apr-aegean-mobility-sup-201` flipping immediately to `INVALIDATED` (`HTTP 409 Conflict`), execute the unaffected commission payout (`HTTP 200 OK`), and verify the Spoken + Grade-1 ASCII Braille Merkle receipt (`AletheiaMerkleReceipt`).

@@ -1,5 +1,7 @@
+import { syncAgTheme } from './ag_grid_bridge';
 import { renderDashboard, renderList } from './runtime_dashboard_list';
 import { renderDetail, renderTargets } from './runtime_detail_targets';
+import { renderStatements } from './runtime_statements';
 import { renderServices } from './runtime_services_a';
 import { consumePayPalOidcCallbackIfPresent } from './runtime_paypal';
 import { cents, csv, download, createFormHandlers } from './runtime_forms';
@@ -10,6 +12,54 @@ declare global {
     __KERDON_INITIAL_TENANTS__?: Array<{ tenant_id: string; display_name: string }>;
   }
 }
+
+const NUMERIC_HEADER_RE =
+  /\b(net|vat|gross|paid|outstanding|amount|balance|debit|credit|revenue|cash|cost|price|valuation|qty|quantity|target|actual|remaining|allocated|invoiced|ebitda|withheld|fee|inflow|outflow|lines|count|attainment)\b|%/i;
+
+function isNumericCellValue(raw: string): boolean {
+  const plain = raw.replace(/<[^>]+>/g, '').trim();
+  if (!plain || plain === '-') return false;
+  return /^[+-]?€\s?[\d,]+(\.\d+)?$/.test(plain) || /^€[\d,.-]+/.test(plain) || /^-?[\d,]+(\.\d+)?\s?(%|x|pcs|days|docs)?$/.test(plain);
+}
+
+const ROLE_ALLOWED_MODULES: Record<string, Set<string> | null> = {
+  MSP_FINOPS_DIRECTOR: null,
+  CLIENT_OWNER: null,
+  ACCOUNTANT: new Set([
+    'dashboard',
+    'statements',
+    'customers',
+    'suppliers',
+    'sales',
+    'purchases',
+    'expenses',
+    'payments',
+    'receipts',
+    'accounting',
+    'close',
+    'workforce',
+    'documents',
+    'intelligence',
+    'billing',
+  ]),
+  STORE_MANAGER: new Set([
+    'dashboard',
+    'statements',
+    'customers',
+    'suppliers',
+    'sales',
+    'purchases',
+    'expenses',
+    'receipts',
+    'targets',
+    'commissions',
+    'inventory',
+    'documents',
+    'billing',
+  ]),
+  SELLER: new Set(['commissions', 'billing']),
+  PUBLIC_AUDITOR: new Set(['dashboard', 'statements', 'accounting', 'close', 'documents', 'billing']),
+};
 
 export function mountWorkspaceRuntime(): void {
   const $ = (id: string) => document.getElementById(id) as any;
@@ -24,9 +74,12 @@ export function mountWorkspaceRuntime(): void {
 
   let data: any = null;
   let lang: 'en' | 'el' = 'en';
+  let activeRole = 'MSP_FINOPS_DIRECTOR';
   const t = (en: string, el: string) => (lang === 'el' ? el : en);
+
   const MODULES_EL: Record<string, string> = {
     dashboard: 'Πίνακας Ελέγχου',
+    statements: 'Οικονομικές Καταστάσεις',
     customers: 'Πελάτες',
     sales: 'Πωλήσεις',
     receipts: 'Εισπράξεις',
@@ -38,31 +91,25 @@ export function mountWorkspaceRuntime(): void {
     payments: 'Πληρωμές',
     inventory: 'Αποθήκη',
     accounting: 'Λογιστική & Ημερολόγιο',
-    reconciliation: 'Συμφωνίες & Ελλείψεις',
     treasury: 'Διαθέσιμα & Εγκρίσεις',
     workforce: 'Μισθοδοσία & ΦΠΑ',
     close: 'Κλείσιμο & Πληρότητα',
     documents: 'Inbox & Παραστατικά',
     intelligence: 'Ερώτηση στο Kerdon AI',
-    billing: 'Συνδρομές & Connectors',
-    assistant: 'AI Οικονομικός Βοηθός',
-    msp: 'Οργανισμός & Connectors',
+    billing: 'Οργανισμός, Ρόλοι & Connectors',
   };
   const GROUPS_EL: Record<string, string> = {
-    'Executive Intelligence': 'Επιχειρησιακή Επισκόπηση',
+    'Overview & Intelligence': 'Επισκόπηση & Καταστάσεις CFO',
     'Order-to-Cash (AR)': 'Πωλήσεις & Εισπράξεις (AR)',
     'Procure-to-Pay (AP)': 'Αγορές & Πληρωμές (AP)',
-    'Supply Chain (SCM)': 'Αποθήκη & Αποθέματα (SCM)',
-    'Overview & Intelligence': 'Επισκόπηση & AI Αναλυτική',
     'Sales & Commissions': 'Πωλήσεις & Προμήθειες',
     'Inventory & Supply Chain': 'Αποθήκη & Εφοδιαστική Αλυσίδα',
     'Record-to-Report (GL & Tax)': 'Λογιστήριο, Μισθοδοσία & ΦΠΑ',
     'Treasury & Governance': 'Διαθέσιμα & Διακυβέρνηση',
-    'Record-to-Report & Treasury': 'Λογιστήριο & Διαθέσιμα',
-    'Statutory & Enterprise': 'Φορολογικά & Υποδομές',
   };
   const modLabel = (m: string) => (lang === 'el' ? MODULES_EL[m] || modules[m] : modules[m]);
   const grpLabel = (g: string) => (lang === 'el' ? GROUPS_EL[g] || g : g);
+
   let module = 'dashboard';
   let selected = '';
   let tab = 'General';
@@ -70,16 +117,14 @@ export function mountWorkspaceRuntime(): void {
   let kpiFilter = '';
   let listStatusFilter = '';
   let target: number | null = null;
-  let draft: any = null;
-  let formTab = 'General';
   let generation = 0;
 
-  async function api(path: string, body?: Record<string, unknown>, extraHeaders?: Record<string, string>): Promise<any> {
+  async function api(pathStr: string, body?: Record<string, unknown>, extraHeaders?: Record<string, string>): Promise<any> {
     const hdrs: Record<string, string> = body ? { 'Content-Type': 'application/json' } : {};
     if ($('tenant') && $('tenant').value) hdrs['X-Active-Tenant'] = $('tenant').value;
-    if ($('role-select') && $('role-select').value) hdrs['X-Kerdon-Role'] = $('role-select').value;
+    if (activeRole) hdrs['X-Kerdon-Role'] = activeRole;
     if (extraHeaders) Object.assign(hdrs, extraHeaders);
-    const r = await fetch(base + path, {
+    const r = await fetch(base + pathStr, {
       method: body ? 'POST' : 'GET',
       credentials: 'same-origin',
       headers: hdrs,
@@ -93,9 +138,10 @@ export function mountWorkspaceRuntime(): void {
       throw Error('Unexpected service response [' + r.status + ']');
     }
     if (!r.ok) {
-      const dbg = value.paypal_debug_id && !String(value.error || '').includes(value.paypal_debug_id)
-        ? ' [PayPal debug_id=' + value.paypal_debug_id + ']'
-        : '';
+      const dbg =
+        value.paypal_debug_id && !String(value.error || '').includes(value.paypal_debug_id)
+          ? ' [PayPal debug_id=' + value.paypal_debug_id + ']'
+          : '';
       throw Error('Service [' + r.status + ']: ' + (value.error || text) + dbg);
     }
     return value;
@@ -119,10 +165,10 @@ export function mountWorkspaceRuntime(): void {
           ? 'Posted'
           : 'Registered';
 
-  function go(m: string, record = '', t = 'General', events: string[] | null = null, kpi = '') {
+  function go(m: string, record = '', tName = 'General', events: string[] | null = null, kpi = '') {
     const q = new URLSearchParams({ module: m });
     if (record) q.set('record', record);
-    if (t !== 'General') q.set('tab', t);
+    if (tName !== 'General') q.set('tab', tName);
     if (events) q.set('events', events.join(','));
     if (kpi) q.set('kpi', kpi);
     document.body.classList.remove('menu-open');
@@ -133,6 +179,8 @@ export function mountWorkspaceRuntime(): void {
     commercial: 'billing',
     gtm: 'billing',
     overview: 'dashboard',
+    reports: 'statements',
+    cards: 'statements',
     ask: 'intelligence',
     mydata: 'documents',
     paypal: 'documents',
@@ -142,7 +190,7 @@ export function mountWorkspaceRuntime(): void {
     const q = new URLSearchParams(window.location.hash.slice(1));
     const rawMod = q.get('module') || '';
     const resolvedMod = MODULE_ALIASES[rawMod] || rawMod;
-    module = modules[resolvedMod] ? resolvedMod : 'dashboard';
+    module = modules[resolvedMod] ? resolvedMod : activeRole === 'SELLER' ? 'commissions' : 'dashboard';
     selected = q.get('record') || '';
     tab = q.get('tab') || 'General';
     eventIds = q.has('events') ? (q.get('events') || '').split(',') : null;
@@ -184,21 +232,64 @@ export function mountWorkspaceRuntime(): void {
   function updateCompanyHeader() {
     if (!data?.tenant) return;
     const prof = fp();
-    $('company-name').textContent =
-      data.tenant.display_name +
-      ' · ' +
-      (prof.is_greek_organization
-        ? t(
-            '🇬🇷 GR (Greece) · TIN (AFM) ' + (data.tenant.fiscal_identity?.tax_id || '') + ' · Tax Office (DOY) ' + (prof.doy || 'Athens Corporate Tax Office (KEFODE Attikis)') + ' · GEMI ' + (prof.gemi_number || '148920301000') + ' · AADE myDATA v1.0.8 Active',
-            '🇬🇷 GR (Ελλάδα) · ΑΦΜ ' + (data.tenant.fiscal_identity?.tax_id || '') + ' · ΔΟΥ ' + (prof.doy || 'ΚΕΦΟΔΕ ΑΤΤΙΚΗΣ') + ' · ΓΕΜΗ ' + (prof.gemi_number || '148920301000') + ' · AADE myDATA v1.0.8 Active'
-          )
-        : '🌐 ' + prof.country_code + ' (' + (prof.country_name || prof.country_code) + ') · Tax ID ' + (data.tenant.fiscal_identity?.tax_id || '') + ' · ' + (prof.einvoice_standard || 'Peppol BIS 3.0'));
+    const taxId = data.tenant.fiscal_identity?.tax_id || '';
+    if ($('sidebar-org-pill')) {
+      $('sidebar-org-pill').textContent = prof.is_greek_organization
+        ? 'GR · ' + t('TIN ', 'ΑΦΜ ') + taxId + ' · myDATA'
+        : (prof.country_code || 'EU') + ' · ' + taxId + ' · Peppol';
+    }
+    if ($('company-name')) {
+      $('company-name').textContent = data.tenant.display_name;
+    }
+  }
+
+  function syncRoleBadge() {
+    const badge = $('role-preview-badge');
+    if (!badge) return;
+    if (activeRole && activeRole !== 'MSP_FINOPS_DIRECTOR') {
+      badge.hidden = false;
+      badge.textContent = t('Role Preview: ' + activeRole + ' · Reset ×', 'Προεπισκόπηση Ρόλου: ' + activeRole + ' · Επαναφορά ×');
+    } else {
+      badge.hidden = true;
+    }
+  }
+
+  async function setActiveRole(nextRole: string) {
+    activeRole = nextRole || 'MSP_FINOPS_DIRECTOR';
+    syncRoleBadge();
+    const allowed = ROLE_ALLOWED_MODULES[activeRole];
+    if (allowed && !allowed.has(module)) {
+      module = activeRole === 'SELLER' ? 'commissions' : 'dashboard';
+      window.location.hash = 'module=' + module;
+    }
+    await load();
   }
 
   async function load() {
     const n = ++generation;
     try {
       $('connection').textContent = 'Refreshing';
+      if (activeRole === 'SELLER') {
+        const comm = await api(path('commissions'));
+        if (n !== generation) return;
+        data = {
+          tenant: { tenant_id: tid(), display_name: $('tenant')?.selectedOptions?.[0]?.textContent || tid() },
+          durability: 'in-memory',
+          dashboard: { start: '2026-10-01', end: '2026-10-31', kpis: { cash: { cents: 0, event_ids: [] }, revenue: { cents: 0, event_ids: [] }, receivables: { cents: 0, event_ids: [] }, payables: { cents: 0, event_ids: [] } }, series: [] },
+          records: {},
+          ledger: [],
+          seller_commissions_preview: comm,
+          capabilities: { invoice_submission: false },
+        };
+        $('connection').textContent = 'Connected';
+        $('notice').textContent = t(
+          'Seller Restricted RBAC View · Financial statements, bank balances, and supplier payables are isolated (VIEW_OWN_SALES only).',
+          'Περιορισμένη Προβολή Πωλητή (RBAC) · Πρόσβαση αποκλειστικά σε ίδιες πωλήσεις και προμήθειες.'
+        );
+        $('error').hidden = true;
+        render();
+        return;
+      }
       const q = new URLSearchParams();
       if ($('start').value) q.set('start', $('start').value);
       if ($('end').value) q.set('end', $('end').value);
@@ -212,7 +303,7 @@ export function mountWorkspaceRuntime(): void {
       $('notice').textContent =
         'Executive Financial Operations · ' +
         (r.durability === 'in-memory' ? 'In-memory sandbox state; changes are not durable.' : 'DynamoDB journal & entity versioning active.') +
-        ' Cash records are journal entries, not bank confirmations unless settled via Sandbox Provider.';
+        ' Cash records reconcile 100% to General Ledger 1000_CASH.';
       $('error').hidden = true;
       render();
     } catch (e) {
@@ -223,19 +314,33 @@ export function mountWorkspaceRuntime(): void {
   }
 
   function table(headers: string[], rows: string[][]) {
+    const colNumeric = headers.map((h, colIdx) => {
+      if (colIdx === 0) return false;
+      if (NUMERIC_HEADER_RE.test(h.replace(/<[^>]+>/g, ''))) return true;
+      return rows.length > 0 && rows.every((r) => isNumericCellValue(String(r[colIdx] ?? '')));
+    });
     return (
       '<div class="table-wrap" tabindex="0"><table><thead><tr>' +
-      headers.map((h) => '<th>' + h + '</th>').join('') +
+      headers.map((h, idx) => '<th' + (colNumeric[idx] ? ' class="num"' : '') + '>' + h + '</th>').join('') +
       '</tr></thead><tbody>' +
-      rows.map((values) => '<tr>' + values.map((v) => '<td>' + v + '</td>').join('') + '</tr>').join('') +
+      rows
+        .map(
+          (values) =>
+            '<tr>' +
+            values
+              .map((v, idx) => '<td' + (colNumeric[idx] || isNumericCellValue(String(v ?? '')) ? ' class="num"' : '') + '>' + v + '</td>')
+              .join('') +
+            '</tr>'
+        )
+        .join('') +
       '</tbody></table>' +
       (rows.length ? '' : '<div class="empty">No records in this view.</div>') +
       '</div>'
     );
   }
 
-  function link(m: string, record: string, label: string, t = 'General') {
-    return '<button class="row-link" data-go="' + esc(m) + '" data-id="' + esc(record) + '" data-tab="' + esc(t) + '">' + esc(label) + '</button>';
+  function link(m: string, record: string, label: string, tName = 'General') {
+    return '<button type="button" class="row-link" data-go="' + esc(m) + '" data-id="' + esc(record) + '" data-tab="' + esc(tName) + '">' + esc(label) + '</button>';
   }
 
   function bind() {
@@ -286,7 +391,14 @@ export function mountWorkspaceRuntime(): void {
   }
 
   function facts(obj: Record<string, any>) {
-    const skip = new Set(['lines', 'line_items', 'allocations', 'historical_invoice_cents', 'tenant_id']);
+    const skip = new Set([
+      'lines',
+      'line_items',
+      'allocations',
+      'historical_invoice_cents',
+      'tenant_id',
+      'afm_validation',
+    ]);
     return (
       '<div class="facts">' +
       Object.entries(obj)
@@ -382,14 +494,14 @@ export function mountWorkspaceRuntime(): void {
 
   function source(docId: string) {
     for (const m of ['sales', 'purchases']) {
-      if (data.records[m].some((r: any) => r.document_id === docId)) return link(m, docId, docId);
+      if ((data.records?.[m] || []).some((r: any) => r.document_id === docId)) return link(m, docId, docId);
     }
     return esc(docId || '-');
   }
 
   function party(partyId: string) {
     for (const m of ['customers', 'suppliers']) {
-      const r = data.records[m].find((rec: any) => rec.id === partyId);
+      const r = (data.records?.[m] || []).find((rec: any) => rec.id === partyId);
       if (r) return link(m, partyId, r.legal_name);
     }
     return esc(partyId || '-');
@@ -448,14 +560,28 @@ export function mountWorkspaceRuntime(): void {
     );
   }
 
+  function shouldShowPeriodFilter(): boolean {
+    if (activeRole === 'SELLER') return false;
+    if (['dashboard', 'statements', 'accounting', 'sales', 'purchases', 'receipts', 'payments', 'expenses', 'targets'].includes(module)) {
+      return !selected || ['Account statement', 'Statistics'].includes(tab);
+    }
+    if (['customers', 'suppliers'].includes(module) && selected && ['Account statement', 'Statistics'].includes(tab)) {
+      return true;
+    }
+    return false;
+  }
+
   function render() {
+    const allowed = ROLE_ALLOWED_MODULES[activeRole];
     $('nav').innerHTML = groups
-      .map(
-        ([g, items]) =>
+      .map(([g, items]) => {
+        const visibleItems = allowed ? items.filter((m) => allowed.has(m)) : items;
+        if (!visibleItems.length) return '';
+        return (
           '<div class="nav-group">' +
           esc(grpLabel(g)) +
           '</div>' +
-          items
+          visibleItems
             .map(
               (m) =>
                 '<a aria-label="' +
@@ -471,18 +597,31 @@ export function mountWorkspaceRuntime(): void {
                 '</span></a>'
             )
             .join('')
-      )
+        );
+      })
       .join('');
+
     const bc = bcMeta[module];
     $('title').textContent = modLabel(module);
-    $('crumb').textContent = bc ? bc.code + ' · ' + bc.name + ' / ' + modLabel(module) + ' (' + bc.standard + ')' : 'Workspace / ' + modLabel(module);
+    $('crumb').textContent = bc ? bc.code + ' · ' + modLabel(module) : 'Workspace / ' + modLabel(module);
+    if ($('page-eyebrow') && bc) {
+      $('page-eyebrow').textContent = bc.code + ' · ' + bc.standard;
+    }
+    if ($('j5-tagline')) {
+      $('j5-tagline').hidden = module !== 'dashboard';
+    }
+    if ($('period-bar')) {
+      $('period-bar').hidden = !shouldShowPeriodFilter();
+    }
+    syncRoleBadge();
+
     if (!data) return;
     if (module === 'dashboard') renderDashboard(ctx);
+    else if (module === 'statements') renderStatements(ctx);
     else if (module === 'targets') renderTargets(ctx);
-    else if (data.records[module]) selected ? renderDetail(ctx) : renderList(ctx);
+    else if (data.records && data.records[module]) selected ? renderDetail(ctx) : renderList(ctx);
     else renderServices(ctx);
   }
-
 
   const ctx: any = {
     $,
@@ -510,6 +649,7 @@ export function mountWorkspaceRuntime(): void {
     isGreekOrg,
     isPayPalActive,
     updateCompanyHeader,
+    setActiveRole,
     load,
     table,
     link,
@@ -527,16 +667,39 @@ export function mountWorkspaceRuntime(): void {
     cents,
     download,
     csv,
-    get data() { return data; },
-    get lang() { return lang; },
-    get module() { return module; },
-    get selected() { return selected; },
-    get tab() { return tab; },
-    get eventIds() { return eventIds; },
-    get kpiFilter() { return kpiFilter; },
-    get listStatusFilter() { return listStatusFilter; },
-    get target() { return target; },
-    set target(v: number | null) { target = v; },
+    get data() {
+      return data;
+    },
+    get lang() {
+      return lang;
+    },
+    get activeRole() {
+      return activeRole;
+    },
+    get module() {
+      return module;
+    },
+    get selected() {
+      return selected;
+    },
+    get tab() {
+      return tab;
+    },
+    get eventIds() {
+      return eventIds;
+    },
+    get kpiFilter() {
+      return kpiFilter;
+    },
+    get listStatusFilter() {
+      return listStatusFilter;
+    },
+    get target() {
+      return target;
+    },
+    set target(v: number | null) {
+      target = v;
+    },
   };
 
   const formHandlers = createFormHandlers(ctx);
@@ -544,18 +707,30 @@ export function mountWorkspaceRuntime(): void {
   ctx.openCmd = formHandlers.openCmd;
   formHandlers.bindFormEvents();
 
+  if ($('content')) {
+    $('content').addEventListener('click', (ev: MouseEvent) => {
+      const targetEl = (ev.target as HTMLElement | null)?.closest?.('[data-go]') as HTMLElement | null;
+      if (targetEl) {
+        go(targetEl.dataset.go || 'dashboard', targetEl.dataset.id || '', targetEl.dataset.tab || 'General');
+      }
+    });
+  }
+
   if ($('menu')) $('menu').onclick = () => document.body.classList.toggle('menu-open');
   if ($('theme-toggle')) {
     $('theme-toggle').onclick = () => {
       document.body.classList.toggle('theme-light');
       $('theme-toggle').textContent = document.body.classList.contains('theme-light') ? '☾ Dark' : '☀ Theme';
+      syncAgTheme();
     };
+  }
+  if ($('role-preview-badge')) {
+    $('role-preview-badge').onclick = () => setActiveRole('MSP_FINOPS_DIRECTOR');
   }
   $('tenant').onchange = () => {
     target = null;
     load();
   };
-  if ($('role-select')) $('role-select').onchange = () => load();
   if ($('lang-select')) {
     $('lang-select').onchange = () => {
       lang = $('lang-select').value === 'el' ? 'el' : 'en';
@@ -584,7 +759,7 @@ export function mountWorkspaceRuntime(): void {
         const fallback = await api('/tenants');
         tenants = fallback.tenants || [];
       }
-      $('tenant').innerHTML = tenants.map((t: any) => '<option value="' + esc(t.tenant_id) + '">' + esc(t.display_name) + '</option>').join('');
+      $('tenant').innerHTML = tenants.map((tItem: any) => '<option value="' + esc(tItem.tenant_id) + '">' + esc(tItem.display_name) + '</option>').join('');
       if (activeId) $('tenant').value = activeId;
       await consumePayPalOidcCallbackIfPresent(ctx);
       route();

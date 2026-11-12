@@ -273,10 +273,18 @@ class GeneralLedger:
         relevant = [
             ev for ev in self.events if period is None or ev.period == period
         ]
+        cumulative = [
+            ev for ev in self.events if period is None or ev.period <= period
+        ]
         net_by_acct: dict[AccountCode, int] = {acct: 0 for acct in AccountCode}
         for ev in relevant:
             for line in ev.lines:
                 net_by_acct[line.account] += line.debit_cents - line.credit_cents
+
+        cum_by_acct: dict[AccountCode, int] = {acct: 0 for acct in AccountCode}
+        for ev in cumulative:
+            for line in ev.lines:
+                cum_by_acct[line.account] += line.debit_cents - line.credit_cents
 
         def credit_normal(acct: AccountCode) -> int:
             return -net_by_acct[acct]
@@ -299,9 +307,9 @@ class GeneralLedger:
         interest_tax = debit_normal(AccountCode.INTEREST_AND_TAX_6900)
         net_income = ebitda - depreciation - interest_tax
 
-        cash_bal = debit_normal(AccountCode.CASH_1000)
-        ar_bal = debit_normal(AccountCode.AR_1100)
-        ap_bal = credit_normal(AccountCode.AP_2000)
+        cash_bal = cum_by_acct[AccountCode.CASH_1000]
+        ar_bal = cum_by_acct[AccountCode.AR_1100]
+        ap_bal = -cum_by_acct[AccountCode.AP_2000]
         vat_net = credit_normal(AccountCode.VAT_OUTPUT_2400) - debit_normal(
             AccountCode.VAT_INPUT_1400
         )
