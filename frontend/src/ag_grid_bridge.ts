@@ -84,7 +84,9 @@ export function syncAgTheme(): void {
   });
   activeCharts.forEach((entry) => {
     try {
-      AgCharts.update(entry.chart, buildChartThemeOptions(entry.baseOpts) as any);
+      entry.chart.destroy();
+      entry.el.innerHTML = '';
+      entry.chart = AgCharts.create(buildChartThemeOptions({ ...entry.baseOpts, container: entry.el }) as any);
     } catch {
       // ignore
     }
