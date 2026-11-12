@@ -103,7 +103,10 @@ p{color:var(--muted);line-height:1.6}
 @media(max-width:767px){.ag-grid-host.ag-wide-mobile{min-width:560px}}
 .ag-right-aligned-cell,.ag-tabular-num{text-align:right!important;font-variant-numeric:tabular-nums}
 .ag-pinned-total-cell{font-weight:700!important;border-top:2px solid var(--primary)!important}
-.ag-html-cell button.row-link{font-size:12px}
+.ag-grid-host .ag-cell{overflow:hidden!important;text-overflow:ellipsis}
+.ag-html-cell{display:inline-flex;align-items:center;gap:6px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ag-html-cell button{padding:3px 8px;min-height:26px;font-size:11.5px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.ag-html-cell button.row-link{padding:0;min-height:22px;font-size:12px}
 .ag-empty-msg{color:var(--muted);font-size:12px}
 
 .section{margin-top:28px}

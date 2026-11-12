@@ -287,16 +287,15 @@ export function bindPayPalCommerceEvents(ctx: any): void {
     document.querySelectorAll('[data-pp-track-cap]').forEach((btn: any) => {
       btn.onclick = async () => {
         try {
+          $('error').hidden = true;
           const capId = btn.getAttribute('data-pp-track-cap');
           const trk = 'DHL-GR-' + String(capId).slice(-6).toUpperCase();
           const res = await api(path('connectors/paypal/tracker'), { capture_id: capId, tracking_number: trk, carrier: 'DHL' });
           const dbg = res.tracker?.debug_id ? ' [debug_id=' + res.tracker.debug_id + ']' : '';
-          $('error').hidden = true;
-          $('notice').textContent = 'Submitted PayPal Shipment Tracker ' + trk + ' for capture ' + capId + dbg + '.';
-          await load();
+          await load('Submitted PayPal Shipment Tracker ' + trk + ' for capture ' + capId + dbg + '.');
         } catch (e: any) {
           const msg = String(e?.message || '');
-          if (msg.includes('PayPal debug_id=')) {
+          if (msg.includes('PayPal debug_id=') || msg.includes('Tracker')) {
             $('error').hidden = true;
             $('notice').textContent = 'PayPal Trackers Batch API reached: ' + msg;
           } else {
@@ -316,30 +315,34 @@ export function bindPayPalCommerceEvents(ctx: any): void {
       onRendered: bindTrackButtons,
       columns: [
         { field: 'order_html', headerName: 'Order ID', isHtml: true, maxWidth: 165 },
-        { field: 'inv_html', headerName: 'Invoice v2', isHtml: true, maxWidth: 165, mobileHide: true },
-        { field: 'doc_html', headerName: 'ERP Document', isHtml: true, maxWidth: 180 },
+        { field: 'inv_html', headerName: 'Invoice v2', isHtml: true, maxWidth: 160, mobileHide: true },
+        { field: 'doc_html', headerName: 'ERP Document', isHtml: true, maxWidth: 175 },
         { field: 'gross_cents', headerName: 'Gross (1100_AR)', cents: true, sumCents: true },
         { field: 'paypal_fee_cents', headerName: 'PayPal Fee (6200)', cents: true, sumCents: true },
         { field: 'net_settled_cents', headerName: 'Net Cash (1000)', cents: true, sumCents: true },
-        { field: 'gl_html', headerName: 'GL Event', isHtml: true, maxWidth: 165, mobileHide: true },
-        { field: 'act_html', headerName: 'Status / Fulfillment', isHtml: true, maxWidth: 195, mobileHide: true },
+        { field: 'gl_html', headerName: 'GL Event', isHtml: true, maxWidth: 155, mobileHide: true },
+        { field: 'act_html', headerName: 'Status / Fulfillment', isHtml: true, minWidth: 195, maxWidth: 235, mobileHide: true },
       ],
-      rows: settledOrders.map((o: any) => ({
-        ...o,
-        gross_cents: o.gross_cents || 0,
-        paypal_fee_cents: o.paypal_fee_cents || 0,
-        net_settled_cents: o.net_settled_cents || 0,
-        order_html: '<code>' + esc(o.order_id) + '</code>',
-        inv_html: '<code>' + esc(o.paypal_invoice_id || '-') + '</code>',
-        doc_html: source(o.document_id),
-        gl_html: o.journal_event_id ? link('accounting', o.journal_event_id, o.journal_event_id) : '-',
-        act_html:
-          '<span class="badge">' +
-          esc(o.status) +
-          '</span> <button type="button" data-pp-track-cap="' +
-          esc(o.capture_id) +
-          '">+ Track DHL</button>',
-      })),
+      rows: settledOrders.map((o: any) => {
+        const jid = String(o.journal_event_id || '');
+        const jLabel = jid.length > 16 ? jid.slice(0, 14) + '…' : jid;
+        return {
+          ...o,
+          gross_cents: o.gross_cents || 0,
+          paypal_fee_cents: o.paypal_fee_cents || 0,
+          net_settled_cents: o.net_settled_cents || 0,
+          order_html: '<code>' + esc(o.order_id) + '</code>',
+          inv_html: '<code>' + esc(o.paypal_invoice_id || '-') + '</code>',
+          doc_html: source(o.document_id),
+          gl_html: jid ? link('accounting', jid, jLabel) : '-',
+          act_html:
+            '<span class="badge">' +
+            esc(o.status) +
+            '</span> <button type="button" data-pp-track-cap="' +
+            esc(o.capture_id) +
+            '">+ Track DHL</button>',
+        };
+      }),
       presets: [
         { id: 'all', label: 'All Settled Captures' },
         { id: 'fees', label: '3-Line Fee Splits (> €0 Fee)', predicate: (r) => (r.paypal_fee_cents || 0) > 0 },
@@ -357,6 +360,7 @@ export function bindPayPalCommerceEvents(ctx: any): void {
   if ($('paypal-verify-btn')) {
     $('paypal-verify-btn').onclick = async () => {
       try {
+        $('error').hidden = true;
         const res = await api(path('connectors/verify'), { connector: 'paypal' });
         const p = res.verification?.paypal || {};
         $('notice').textContent =
@@ -372,9 +376,9 @@ export function bindPayPalCommerceEvents(ctx: any): void {
   if ($('paypal-webhook-reg-btn')) {
     $('paypal-webhook-reg-btn').onclick = async () => {
       try {
+        $('error').hidden = true;
         const res = await api(path('connectors/paypal/webhooks/register'), {});
-        $('notice').textContent = 'PayPal Webhook v1 active: ' + (res.webhook?.webhook_id || '') + ' -> ' + (res.webhook?.url || '');
-        await load();
+        await load('PayPal Webhook v1 active: ' + (res.webhook?.webhook_id || '') + ' -> ' + (res.webhook?.url || ''));
       } catch (e) {
         fail(e);
       }
@@ -384,6 +388,7 @@ export function bindPayPalCommerceEvents(ctx: any): void {
   if ($('paypal-sync-disputes-btn')) {
     $('paypal-sync-disputes-btn').onclick = async () => {
       try {
+        $('error').hidden = true;
         const res = await api(path('connectors/paypal/disputes/sync'), {});
         $('notice').textContent =
           'Synced PayPal Disputes v1 (' + (res.provider_mode || '') + '): ' + (res.count ?? 0) + ' open live disputes.';
@@ -396,6 +401,7 @@ export function bindPayPalCommerceEvents(ctx: any): void {
   if ($('paypal-payout-btn')) {
     $('paypal-payout-btn').onclick = async () => {
       try {
+        $('error').hidden = true;
         const slug = data.tenant?.slug || 'aegean-mobility';
         let apId = 'apr-' + slug + '-comm-oct';
         try {
@@ -420,9 +426,7 @@ export function bindPayPalCommerceEvents(ctx: any): void {
           approval_id: apId,
           executor_id: 'act-nikos-alexiou',
         });
-        $('error').hidden = true;
-        $('notice').textContent = 'Executed Governed PayPal Payout Batch: ' + (res.payout?.payout_batch_id || '');
-        await load();
+        await load('Executed Governed PayPal Payout Batch: ' + (res.payout?.payout_batch_id || ''));
       } catch (e: any) {
         const msg = String(e?.message || '');
         if (msg.includes('INSUFFICIENT_FUNDS')) {
@@ -440,13 +444,13 @@ export function bindPayPalCommerceEvents(ctx: any): void {
   if ($('paypal-agent-run-btn')) {
     $('paypal-agent-run-btn').onclick = async () => {
       try {
+        $('error').hidden = true;
         const goal = ($('paypal-agent-input')?.value || '').trim();
         $('paypal-agent-run-btn').disabled = true;
         $('paypal-agent-run-btn').textContent = 'Running Strands @tool Agent...';
         const res = await api(path('connectors/paypal/agent'), { goal });
         lastPayPalAgentResult = res;
-        $('notice').textContent = 'PayPal Strands Agent executed ' + (res.tools_executed_count || 0) + ' tool(s).';
-        await load();
+        await load('PayPal Strands Agent executed ' + (res.tools_executed_count || 0) + ' tool(s).');
       } catch (e) {
         fail(e);
       } finally {
@@ -461,15 +465,16 @@ export function bindPayPalCommerceEvents(ctx: any): void {
   if ($('paypal-create-order-btn')) {
     $('paypal-create-order-btn').onclick = async () => {
       try {
+        $('error').hidden = true;
         const docId = pickUnpaidDoc();
         const res = await api(path('connectors/paypal/order'), { document_id: docId, auto_capture: false });
-        $('notice').textContent =
+        await load(
           'Created PayPal Order v2 ' +
-          (res.order?.order_id || '') +
-          ' [' +
-          (res.order?.status || 'CREATED') +
-          ']. Approve as buyer via Checkout link, then click Capture -> GL.';
-        await load();
+            (res.order?.order_id || '') +
+            ' [' +
+            (res.order?.status || 'CREATED') +
+            ']. Approve as buyer via Checkout link, then click Capture -> GL.'
+        );
       } catch (e) {
         fail(e);
       }
@@ -479,6 +484,7 @@ export function bindPayPalCommerceEvents(ctx: any): void {
   if ($('paypal-capture-next-btn')) {
     $('paypal-capture-next-btn').onclick = async () => {
       try {
+        $('error').hidden = true;
         const pending = data.connectors?.paypal?.pending_orders || [];
         if (pending.length && data.connectors?.runtime_modes?.paypal_credentials_present) {
           const first = pending[0];
@@ -486,10 +492,7 @@ export function bindPayPalCommerceEvents(ctx: any): void {
             order_id: first.order_id,
             document_id: first.document_id,
           });
-          await load();
-          if (ppRes.agentic_commerce_narrative?.executive_summary) {
-            $('notice').textContent = ppRes.agentic_commerce_narrative.executive_summary;
-          }
+          await load(ppRes.agentic_commerce_narrative?.executive_summary || 'Captured PayPal Order ' + first.order_id + '.');
           return;
         }
         const docId = pickUnpaidDoc();
@@ -498,15 +501,13 @@ export function bindPayPalCommerceEvents(ctx: any): void {
           document_id: docId,
           auto_capture: !isLive,
         });
-        await load();
-        if (!ppRes.captured) {
-          $('notice').textContent =
-            'Live Sandbox Order ' +
-            (ppRes.order?.order_id || '') +
-            ' created! Open "Approve on PayPal Sandbox" to authorize buyer funds, then click "Capture -> GL".';
-        } else if (ppRes.agentic_commerce_narrative?.executive_summary) {
-          $('notice').textContent = ppRes.agentic_commerce_narrative.executive_summary;
-        }
+        await load(
+          !ppRes.captured
+            ? 'Live Sandbox Order ' +
+                (ppRes.order?.order_id || '') +
+                ' created! Open "Approve on PayPal Sandbox" to authorize buyer funds, then click "Capture -> GL".'
+            : ppRes.agentic_commerce_narrative?.executive_summary || ''
+        );
       } catch (e) {
         fail(e);
       }
@@ -516,6 +517,7 @@ export function bindPayPalCommerceEvents(ctx: any): void {
   if ($('paypal-create-sub-btn')) {
     $('paypal-create-sub-btn').onclick = async () => {
       try {
+        $('error').hidden = true;
         const tierName = ($('paypal-sub-tier')?.value || 'Kerdon Autonomous Mini-ERP Pro').trim();
         const eur = Math.max(10, Number($('paypal-sub-price')?.value || 149));
         const res = await api(path('connectors/paypal/subscription'), {
@@ -523,13 +525,13 @@ export function bindPayPalCommerceEvents(ctx: any): void {
           monthly_price_cents: Math.round(eur * 100),
           currency: 'EUR',
         });
-        $('notice').textContent =
+        await load(
           'Provisioned PayPal Subscription ' +
-          (res.subscription?.subscription_id || '') +
-          ' (Plan ' +
-          (res.subscription?.plan_id || '') +
-          ').';
-        await load();
+            (res.subscription?.subscription_id || '') +
+            ' (Plan ' +
+            (res.subscription?.plan_id || '') +
+            ').'
+        );
       } catch (e) {
         fail(e);
       }
@@ -539,10 +541,10 @@ export function bindPayPalCommerceEvents(ctx: any): void {
   document.querySelectorAll('[data-pp-sync-order]').forEach((btn: any) => {
     btn.onclick = async () => {
       try {
+        $('error').hidden = true;
         const oid = btn.getAttribute('data-pp-sync-order');
         const res = await api(path('connectors/paypal/order-status'), { order_id: oid });
-        $('notice').textContent = 'Order ' + oid + ' live status: ' + (res.order_status?.status || 'UNKNOWN');
-        await load();
+        await load('Order ' + oid + ' live status: ' + (res.order_status?.status || 'UNKNOWN'));
       } catch (e) {
         fail(e);
       }
@@ -552,12 +554,11 @@ export function bindPayPalCommerceEvents(ctx: any): void {
   document.querySelectorAll('[data-pp-cap-order]').forEach((btn: any) => {
     btn.onclick = async () => {
       try {
+        $('error').hidden = true;
         const oid = btn.getAttribute('data-pp-cap-order');
         const docId = btn.getAttribute('data-pp-cap-doc');
         const res = await api(path('connectors/paypal/capture'), { order_id: oid, document_id: docId });
-        $('notice').textContent =
-          res.agentic_commerce_narrative?.executive_summary || 'Captured Order ' + oid + ' into 3-line GL journal.';
-        await load();
+        await load(res.agentic_commerce_narrative?.executive_summary || 'Captured Order ' + oid + ' into 3-line GL journal.');
       } catch (e) {
         fail(e);
       }

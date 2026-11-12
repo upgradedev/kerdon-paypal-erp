@@ -97,33 +97,47 @@ export function mountWorkspaceRuntime(): void {
   let listStatusFilter = '';
   let target: number | null = null;
   let generation = 0;
+  let inFlightMutations = 0;
 
   async function api(pathStr: string, body?: Record<string, unknown>, extraHeaders?: Record<string, string>): Promise<any> {
     const hdrs: Record<string, string> = body ? { 'Content-Type': 'application/json' } : {};
     if ($('tenant') && $('tenant').value) hdrs['X-Active-Tenant'] = $('tenant').value;
     if (activeRole) hdrs['X-Kerdon-Role'] = activeRole;
     if (extraHeaders) Object.assign(hdrs, extraHeaders);
-    const r = await fetch(base + pathStr, {
-      method: body ? 'POST' : 'GET',
-      credentials: 'same-origin',
-      headers: hdrs,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const text = await r.text();
-    let value: any;
+    if (body) {
+      inFlightMutations += 1;
+      if ($('connection')) $('connection').textContent = 'Processing…';
+    }
     try {
-      value = JSON.parse(text);
-    } catch {
-      throw Error('Unexpected service response [' + r.status + ']');
+      const r = await fetch(base + pathStr, {
+        method: body ? 'POST' : 'GET',
+        credentials: 'same-origin',
+        headers: hdrs,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const text = await r.text();
+      let value: any;
+      try {
+        value = JSON.parse(text);
+      } catch {
+        throw Error('Unexpected service response [' + r.status + ']');
+      }
+      if (!r.ok) {
+        const dbg =
+          value.paypal_debug_id && !String(value.error || '').includes(value.paypal_debug_id)
+            ? ' [PayPal debug_id=' + value.paypal_debug_id + ']'
+            : '';
+        throw Error('Service [' + r.status + ']: ' + (value.error || text) + dbg);
+      }
+      return value;
+    } finally {
+      if (body) {
+        inFlightMutations = Math.max(0, inFlightMutations - 1);
+        if (inFlightMutations === 0 && $('connection') && $('connection').textContent === 'Processing…') {
+          $('connection').textContent = 'Connected';
+        }
+      }
     }
-    if (!r.ok) {
-      const dbg =
-        value.paypal_debug_id && !String(value.error || '').includes(value.paypal_debug_id)
-          ? ' [PayPal debug_id=' + value.paypal_debug_id + ']'
-          : '';
-      throw Error('Service [' + r.status + ']: ' + (value.error || text) + dbg);
-    }
-    return value;
   }
 
   const tid = () => $('tenant')?.value || '';
@@ -244,7 +258,8 @@ export function mountWorkspaceRuntime(): void {
     await load();
   }
 
-  async function load() {
+  async function load(customNotice?: unknown) {
+    const noticeOverride = typeof customNotice === 'string' ? customNotice : '';
     const n = ++generation;
     try {
       $('connection').textContent = 'Refreshing';
@@ -280,9 +295,10 @@ export function mountWorkspaceRuntime(): void {
       updateCompanyHeader();
       $('connection').textContent = 'Connected';
       $('notice').textContent =
+        noticeOverride ||
         'Executive Financial Operations · ' +
-        (r.durability === 'in-memory' ? 'In-memory sandbox state; changes are not durable.' : 'DynamoDB journal & entity versioning active.') +
-        ' Cash records reconcile 100% to General Ledger 1000_CASH.';
+          (r.durability === 'in-memory' ? 'In-memory sandbox state; changes are not durable.' : 'DynamoDB journal & entity versioning active.') +
+          ' Cash records reconcile 100% to General Ledger 1000_CASH.';
       $('error').hidden = true;
       render();
     } catch (e) {
