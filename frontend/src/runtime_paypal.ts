@@ -314,14 +314,14 @@ export function bindPayPalCommerceEvents(ctx: any): void {
       primaryAmountField: 'gross_cents',
       onRendered: bindTrackButtons,
       columns: [
-        { field: 'order_html', headerName: 'Order ID', isHtml: true, maxWidth: 165 },
-        { field: 'inv_html', headerName: 'Invoice v2', isHtml: true, maxWidth: 160, mobileHide: true },
-        { field: 'doc_html', headerName: 'ERP Document', isHtml: true, maxWidth: 175 },
-        { field: 'gross_cents', headerName: 'Gross (1100_AR)', cents: true, sumCents: true },
-        { field: 'paypal_fee_cents', headerName: 'PayPal Fee (6200)', cents: true, sumCents: true },
-        { field: 'net_settled_cents', headerName: 'Net Cash (1000)', cents: true, sumCents: true },
-        { field: 'gl_html', headerName: 'GL Event', isHtml: true, maxWidth: 155, mobileHide: true },
-        { field: 'act_html', headerName: 'Status / Fulfillment', isHtml: true, minWidth: 195, maxWidth: 235, mobileHide: true },
+        { field: 'order_html', headerName: 'Order ID', isHtml: true, minWidth: 102, maxWidth: 150 },
+        { field: 'inv_html', headerName: 'Invoice v2', isHtml: true, minWidth: 98, maxWidth: 145, mobileHide: true },
+        { field: 'doc_html', headerName: 'ERP Document', isHtml: true, minWidth: 108, maxWidth: 165 },
+        { field: 'gross_cents', headerName: 'Gross (1100_AR)', cents: true, sumCents: true, minWidth: 104 },
+        { field: 'paypal_fee_cents', headerName: 'PayPal Fee (6200)', cents: true, sumCents: true, minWidth: 98 },
+        { field: 'net_settled_cents', headerName: 'Net Cash (1000)', cents: true, sumCents: true, minWidth: 104 },
+        { field: 'gl_html', headerName: 'GL Event', isHtml: true, minWidth: 96, maxWidth: 140, mobileHide: true },
+        { field: 'act_html', headerName: 'Status / Fulfillment', isHtml: true, minWidth: 170, maxWidth: 215, mobileHide: true },
       ],
       rows: settledOrders.map((o: any) => {
         const jid = String(o.journal_event_id || '');
