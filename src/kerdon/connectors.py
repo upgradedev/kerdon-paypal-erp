@@ -231,8 +231,10 @@ def get_connector_state(state: Any) -> TenantConnectorState:
         )
         conn_state = TenantConnectorState(config=cfg)
         pp_seed = build_default_paypal_seed_bundle(state)
-        if pp_seed.get("order"):
-            conn_state.paypal_orders[pp_seed["order"]["order_id"]] = PayPalOrderSettlementRecord(**pp_seed["order"])
+        for o_seed in pp_seed.get("orders") or ([pp_seed["order"]] if pp_seed.get("order") else []):
+            conn_state.paypal_orders[o_seed["order_id"]] = PayPalOrderSettlementRecord(**o_seed)
+        if pp_seed.get("subscription"):
+            conn_state.paypal_subscriptions[pp_seed["subscription"]["subscription_id"]] = dict(pp_seed["subscription"])
         if pp_seed.get("dispute"):
             conn_state.paypal_disputes[pp_seed["dispute"]["dispute_id"]] = PayPalDisputeRecord(**pp_seed["dispute"])
         if pp_seed.get("payout"):

@@ -229,31 +229,23 @@ def handle_get_draft_pdf(
     *,
     head_only: bool = False,
 ) -> dict[str, Any]:
-    """Render and return a downloadable PDF 1.4 artifact for an outbound draft (A3)."""
+    """Render and return a downloadable PDF 1.4 artifact for an outbound draft or register document (A3)."""
     def _render() -> kd.RenderedPdfArtifact:
-        matching = [
-            (idx + 1, d)
-            for idx, d in enumerate(state.outbound_drafts)
-            if d.draft_id == draft_id
-        ]
-        if not matching:
-            if not state.outbound_drafts:
-                raise KeyError(f"Unknown draft_id: {draft_id}")
-            seq_idx, target_draft = 1, state.outbound_drafts[0]
-        else:
-            seq_idx, target_draft = matching[0]
         disc_raw = _query_param(event, "discount_cents", "0")
         try:
             disc_cents = max(0, int(disc_raw))
         except ValueError:
             disc_cents = 0
-        return kd.render_outbound_draft_pdf(
-            target_draft, state.tenant, sequence_index=seq_idx, discount_cents=disc_cents
-        )
+        return kd.resolve_and_render_tenant_pdf(state, draft_id, discount_cents=disc_cents)
 
     artifact = reader.read(tid, _render)
-    fmt = _query_param(event, "format", "json").lower()
-    if fmt == "binary":
+    fmt = _query_param(event, "format", "").lower()
+    hdrs = event.get("headers") or {}
+    accept_hdr = str(hdrs.get("accept") or hdrs.get("Accept") or "").lower()
+    wants_binary = fmt == "binary" or (
+        fmt != "json" and ("text/html" in accept_hdr or "application/pdf" in accept_hdr)
+    )
+    if wants_binary:
         return {
             "statusCode": 200,
             "headers": {

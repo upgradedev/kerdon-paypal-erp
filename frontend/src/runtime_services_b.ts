@@ -1,20 +1,62 @@
-import { bindPayPalCommerceEvents, renderPayPalCommerceSection } from './runtime_paypal';
+import { renderKpiTile } from './kpi_catalog';
 
 export function renderServicesPartB(ctx: any, r: any, view: any): void {
-  const { $, esc, money, party, source, facts, hbarChart, stackedChart, table, link, isGreekOrg, isPayPalActive, fp, api, path, load, fail, t, base, data, module } = ctx;
+  const { $, esc, money, party, source, facts, hbarChart, stackedChart, table, link, isGreekOrg, isPayPalActive, fp, api, path, load, fail, go, download, fetchAndDownloadPdf, t, lang, data, module } = ctx;
       if (module === 'inventory') {
         const skus: any[] = r.skus || [];
         const movs: any[] = r.movements || [];
-        const poList: any[] = r.reorder_purchase_orders || [];
+        const poList: any[] = r.purchase_order_drafts || r.reorder_purchase_orders || [];
+        const valCents = r.total_valuation_cents ?? r.total_inventory_valuation_cents ?? 0;
+        const cogsCents = r.period_cogs_cents ?? r.total_cogs_cents ?? 0;
+        const lowCount = r.low_stock_count ?? r.low_stock_alert_count ?? 0;
         const skuOpts = skus.map((s: any) => '<option value="' + esc(s.sku_code) + '">' + esc(s.sku_code + ' · ' + (s.title || s.name)) + '</option>').join('');
         view.innerHTML =
-          facts({
-            total_skus: skus.length,
-            total_inventory_valuation_cents: r.total_inventory_valuation_cents || 0,
-            total_cogs_cents: r.total_cogs_cents || 0,
-            low_stock_alert_count: r.low_stock_alert_count || 0,
-            auto_reorder_pos_drafted: poList.length,
+          '<div class="kpis" style="margin-bottom:16px">' +
+          renderKpiTile({
+            metricKey: 'current_ratio',
+            lang: lang || 'en',
+            customTitle: 'Warehouse Valuation (IAS 2 WAC)',
+            valueText: money(valCents),
+            subText: skus.length + ' active SKUs · ' + (r.total_units_on_hand || 0) + ' units on hand',
+            customTip: {
+              meaningEn: 'Total carrying value of physical warehouse inventory at Weighted Average Cost.',
+              meaningEl: 'Συνολική αξία αποθεμάτων αποθήκης με τη μέθοδο του Μέσου Σταθμικού Κόστους.',
+              formulaEn: 'Sum of (SKU On-Hand Qty x WAC Unit Cost) -> GL 1200_INVENTORY',
+              formulaEl: 'Άθροισμα (Ποσότητα x Μέσο Κόστος Μονάδας) -> Λογ. 1200_ΑΠΟΘΕΜΑΤΑ',
+              basisEn: 'IAS 2 Weighted Average Cost (WAC) · Integer Cents',
+              basisEl: 'ΔΛΠ 2 Μέσο Σταθμικό Κόστος · Ακέραια λεπτά ευρώ',
+            },
           }) +
+          renderKpiTile({
+            metricKey: 'gross_margin',
+            lang: lang || 'en',
+            customTitle: 'Period COGS Posted (GL 5000)',
+            valueText: money(cogsCents),
+            subText: movs.length + ' stock movement(s) in audit trail',
+            customTip: {
+              meaningEn: 'Direct cost of goods dispatched to customers during the period.',
+              meaningEl: 'Κόστος πωληθέντων εμπορευμάτων που διακινήθηκαν στην περίοδο.',
+              formulaEn: 'Sum of Dispatched Qty x WAC Unit Cost -> GL 5000_COGS',
+              formulaEl: 'Ποσότητα Εξαγωγής x Μέσο Κόστος Μονάδας -> Λογ. 5000_ΚΟΣΤΟΣ_ΠΩΛΗΘΕΝΤΩΝ',
+              basisEn: 'IFRS 15 / IAS 2 Matching Principle',
+              basisEl: 'ΔΛΠ 2 Συμφωνία Αποθήκης & Κατάστασης Αποτελεσμάτων',
+            },
+          }) +
+          renderKpiTile({
+            metricKey: 'payables',
+            lang: lang || 'en',
+            customTitle: 'Low-Stock Reorder Alerts',
+            valueText: String(lowCount) + ' SKU' + (lowCount === 1 ? '' : 's'),
+            subText: 'Available qty at or below safety reorder point',
+          }) +
+          renderKpiTile({
+            metricKey: 'payables',
+            lang: lang || 'en',
+            customTitle: 'Auto-Drafted Reorder POs',
+            valueText: money(poList.reduce((s, po) => s + (po.gross_cents ?? po.estimated_total_cents ?? 0), 0)),
+            subText: poList.length + ' supplier PO draft(s) awaiting approval',
+          }) +
+          '</div>' +
           '<div class="chart-grid" style="margin:20px 0">' +
           hbarChart(
             'Warehouse Valuation by SKU (Weighted Average Cost)',
@@ -48,7 +90,7 @@ export function renderServicesPartB(ctx: any, r: any, view: any): void {
               '<strong>' + esc(s.on_hand_qty) + ' ' + esc(s.unit_of_measure || 'pcs') + '</strong>',
               esc(s.reorder_point_qty),
               money(s.unit_cost_cents),
-              money(s.unit_sale_price_cents || 0),
+              money(s.unit_list_price_cents ?? s.unit_sale_price_cents ?? 0),
               '<strong>' + money((s.on_hand_qty || 0) * (s.unit_cost_cents || 0)) + '</strong>',
               '<span class="badge">' + esc((s.on_hand_qty || 0) <= (s.reorder_point_qty || 0) ? 'LOW STOCK' : 'HEALTHY') + '</span>',
             ])
@@ -58,17 +100,20 @@ export function renderServicesPartB(ctx: any, r: any, view: any): void {
               movs.length +
               ')</h3>' +
               table(
-                ['Movement ID', 'Date', 'SKU', 'Movement Kind', 'Qty Delta', 'Unit Cost', 'COGS Posted', 'Ledger Event'],
-                movs.map((m: any) => [
-                  esc(m.movement_id),
-                  esc(m.occurred_date),
-                  '<code>' + esc(m.sku_code) + '</code>',
-                  '<span class="badge">' + esc(m.movement_kind) + '</span>',
-                  esc(m.quantity_delta > 0 ? '+' + m.quantity_delta : m.quantity_delta),
-                  money(m.unit_cost_cents || 0),
-                  money(m.cogs_cents || 0),
-                  m.ledger_event_id ? link('accounting', m.ledger_event_id, m.ledger_event_id) : '-',
-                ])
+                ['Movement ID', 'Date', 'SKU', 'Movement Kind', 'Qty Delta', 'Unit Cost', 'COGS Posted', 'Source Document'],
+                movs.map((m: any) => {
+                  const qd = m.qty_delta ?? m.quantity_delta ?? 0;
+                  return [
+                    esc(m.movement_id),
+                    esc(m.occurred_date),
+                    '<code>' + esc(m.sku_code) + '</code>',
+                    '<span class="badge">' + esc(m.kind || m.movement_kind || 'MOVEMENT') + '</span>',
+                    esc(qd > 0 ? '+' + qd : String(qd)),
+                    money(m.unit_cost_cents || 0),
+                    money(m.cogs_posted_cents ?? m.cogs_cents ?? 0),
+                    m.linked_document_id ? source(m.linked_document_id) : m.ledger_event_id ? link('accounting', m.ledger_event_id, m.ledger_event_id) : '-',
+                  ];
+                })
               ) +
               '</div>'
             : '') +
@@ -77,13 +122,15 @@ export function renderServicesPartB(ctx: any, r: any, view: any): void {
               poList.length +
               ')</h3>' +
               table(
-                ['PO ID', 'SKU', 'Supplier', 'Order Qty', 'Estimated Total', 'Status'],
+                ['PO ID', 'SKU', 'Supplier', 'Order Qty', 'Net', 'VAT', 'Gross Total', 'Status'],
                 poList.map((po: any) => [
                   esc(po.po_id),
                   '<code>' + esc(po.sku_code) + '</code>',
-                  party(po.supplier_id),
+                  po.supplier_id ? party(po.supplier_id) : esc(po.supplier_name || '-'),
                   esc(po.order_qty),
-                  money(po.estimated_total_cents || 0),
+                  money(po.net_cents || 0),
+                  money(po.vat_cents || 0),
+                  '<strong>' + money(po.gross_cents ?? po.estimated_total_cents ?? 0) + '</strong>',
                   '<span class="badge">' + esc(po.status || 'DRAFT_APPROVAL_REQUIRED') + '</span>',
                 ])
               ) +
@@ -192,6 +239,8 @@ export function renderServicesPartB(ctx: any, r: any, view: any): void {
         const md = data.connectors?.mydata || {};
         const envList = data.evidence_inbox?.envelopes || [];
         const draftsList: any[] = r.outbound_drafts || [];
+        const hp = r.board_pack?.handoff_packet || {};
+        const openGaps = hp.open_gap_count ?? 0;
         view.innerHTML =
           facts({
             organization_country: (fp().country_code || 'GR') + ' (' + (fp().country_name || 'Greece') + ')',
@@ -200,34 +249,42 @@ export function renderServicesPartB(ctx: any, r: any, view: any): void {
             deduplicated_blobs: data.evidence_inbox?.blobs_count || 0,
             outbound_remediation_drafts: draftsList.length,
             mydata_transmitted_marks: isGreekOrg() ? md.transmitted_count || 0 : 'INACTIVE (NON-GR)',
-            merkle_sealed_board_pack: r.board_pack?.handoff_packet?.ready_for_close ? 'SEALED' : 'OPEN_BLOCKERS',
+            merkle_sealed_board_pack: openGaps === 0 && r.board_pack ? 'SEALED' : openGaps + ' OPEN GAP ITEMS (MERKLE SEALED)',
           }) +
+          (isPayPalActive()
+            ? '<div class="toolbar section" style="justify-content:space-between;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface-muted)"><span><strong>PayPal &amp; Agentic Commerce Hub</strong> · Live Orders v2, 3-Line Fee GL Studio, Subscriptions v1, Payouts v1 &amp; Disputes v1 have moved to a dedicated top-level workspace module.</span><button type="button" id="jump-paypal-hub-btn" class="primary">Open PayPal Commerce Hub →</button></div>'
+            : '') +
           '<div class="section"><h3>Omnichannel Evidence Inbox &amp; Recursive .msg/.eml Graph (ADR-028 / ADR-048)</h3><p>Content-addressed SHA-256 deduplication across forwarded emails and nested attachments. HTML email bodies are retained as commission/sales evidence and structurally barred from invoice ledger posting.</p>' +
           (envList.length
             ? table(
                 ['Envelope ID', 'Sender', 'Subject', 'Received at', 'Attachments', 'SHA-256 content hash'],
-                envList.map((ev: any) => [
-                  esc(ev.envelope_id || ev.message_id),
-                  esc(ev.sender),
-                  esc(ev.subject),
-                  esc(ev.received_at || '2026-10-31'),
-                  esc((ev.attachments || []).length + ' files'),
-                  '<span class="hash">' + esc((ev.sha256_hex || ev.body_sha256 || '').slice(0, 18)) + '…</span>',
-                ])
+                envList.map((ev: any) => {
+                  const h = ev.sha256_hex || ev.body_sha256 || ev.attachments?.[0]?.sha256 || '';
+                  return [
+                    esc(ev.envelope_id || ev.message_id),
+                    esc(ev.sender),
+                    esc(ev.subject),
+                    esc(ev.received_at || '2026-10-28'),
+                    esc((ev.attachments || []).length + ' files'),
+                    '<span class="hash">' + esc(h ? h.slice(0, 18) + '…' : ev.message_id) + '</span>',
+                  ];
+                })
               )
             : '') +
           '</div><div class="section"><h3>Autonomous Outbound Document Generator (' +
           draftsList.length +
           ' drafts · ADR-022 / ADR-026 / ADR-040)</h3>' +
           table(
-            ['Draft ID', 'Doc Type', 'Recipient', 'Subject', 'Amount', 'PDF Export'],
+            ['Draft ID', 'Doc Type', 'Recipient', 'Subject', 'Net', 'VAT', 'Gross Total', 'PDF Export'],
             draftsList.map((d: any) => [
               esc(d.draft_id),
               '<span class="badge">' + esc(d.doc_type || d.document_type || 'OUTBOUND') + '</span>',
               esc(d.recipient_name || '-'),
               esc(d.subject || d.document_type),
-              money(d.amount_cents || 0),
-              '<a href="' + esc((base || '') + '/erp/docgen/' + encodeURIComponent(d.draft_id) + '/pdf') + '" target="_blank" rel="noopener noreferrer">↓ Download PDF (%PDF-1.4)</a>',
+              money(d.net_cents || 0),
+              money(d.vat_cents || 0),
+              '<strong>' + money(d.gross_cents ?? d.amount_cents ?? 0) + '</strong>',
+              '<button type="button" class="primary" data-pdf-draft="' + esc(d.draft_id) + '">↓ Download PDF (%PDF-1.4)</button>',
             ])
           ) +
           '</div>' +
@@ -278,8 +335,17 @@ export function renderServicesPartB(ctx: any, r: any, view: any): void {
               '</strong>.</p></div>') +
           '<div class="section"><h3>Month-End CFO Board Pack &amp; Accountant Handoff Packet</h3>' +
           facts(r.board_pack?.handoff_packet || { period: r.board_pack?.period, ready_for_close: String(Boolean(r.board_pack)) }) +
-          '</div>' +
-          renderPayPalCommerceSection(ctx);
+          '</div>';
+        if ($('jump-paypal-hub-btn')) $('jump-paypal-hub-btn').onclick = () => go('paypal');
+        view.querySelectorAll('[data-pdf-draft]').forEach((btn: any) => {
+          btn.onclick = async () => {
+            try {
+              await fetchAndDownloadPdf(ctx, btn.getAttribute('data-pdf-draft'));
+            } catch (e) {
+              fail(e);
+            }
+          };
+        });
         if ($('mydata-tx-all-btn'))
           $('mydata-tx-all-btn').onclick = async () => {
             try {
@@ -290,7 +356,6 @@ export function renderServicesPartB(ctx: any, r: any, view: any): void {
               fail(e);
             }
           };
-        bindPayPalCommerceEvents(ctx);
       } else {
         const cn = data.connectors || {};
         const cfg = cn.config || {};
@@ -436,9 +501,7 @@ export function renderServicesPartB(ctx: any, r: any, view: any): void {
             ['Member', 'Subject / Email', 'Role in this organization', 'Status'],
             (oa.members || []).map((m: any) => [esc(m.display_name), esc(m.email || m.sub), esc(m.role), esc(m.status || 'ACTIVE')])
           ) +
-          '</div><div class="section"><h3>Go-To-Market (GTM) &amp; AWS Marketplace SaaS Enablement Launchpad</h3><p>End-to-end commercial onboarding for AWS Managed Service Providers: resolve AWS Marketplace SaaS customer contracts, meter active client tenants and period closes via <code>meteringmarketplace</code>, import balanced opening trial balances, and export Merkle-sealed Xero/SoftOne/myDATA journals.</p><div class="toolbar"><button id="gtm-readiness-btn" type="button" class="primary">Check 6-Pillar GTM Readiness</button><button id="gtm-mp-resolve-btn" type="button">Resolve AWS Marketplace Contract &amp; Meter Usage</button><button id="gtm-opening-tb-btn" type="button">Import Balanced Opening Trial Balance</button><a class="btn-link" href="' +
-          esc((base || '') + '/tenants/' + encodeURIComponent(data.tenant.tenant_id) + '/export/journal-csv') +
-          '" target="_blank" rel="noopener noreferrer">Export Xero / myDATA Journal CSV ↗</a></div><div id="gtm-launchpad-output" style="margin-top:10px"></div></div>' +
+          '</div><div class="section"><h3>Go-To-Market (GTM) &amp; AWS Marketplace SaaS Enablement Launchpad</h3><p>End-to-end commercial onboarding for AWS Managed Service Providers: resolve AWS Marketplace SaaS customer contracts, meter active client tenants and period closes via <code>meteringmarketplace</code>, import balanced opening trial balances, and export Merkle-sealed Xero/SoftOne/myDATA journals.</p><div class="toolbar"><button id="gtm-readiness-btn" type="button" class="primary">Check 6-Pillar GTM Readiness</button><button id="gtm-mp-resolve-btn" type="button">Resolve AWS Marketplace Contract &amp; Meter Usage</button><button id="gtm-opening-tb-btn" type="button">Import Balanced Opening Trial Balance</button><button id="gtm-export-csv-btn" type="button">↓ Export Xero / myDATA Journal CSV</button></div><div id="gtm-launchpad-output" style="margin-top:10px"></div></div>' +
           '<div class="section"><h3>Pluggable payment &amp; statutory tax connectors</h3><div class="toolbar"><label>Payment plugin <select id="pay-conn">' +
           ['NONE', 'BANK_IBAN', 'PAYPAL', 'STRIPE'].map((k) => '<option value="' + k + '" ' + (cfg.payment_connector === k ? 'selected' : '') + '>' + k + '</option>').join('') +
           '</select></label><label>Tax authority plugin <select id="tax-conn">' +
@@ -574,6 +637,16 @@ export function renderServicesPartB(ctx: any, r: any, view: any): void {
                   );
               }
               $('notice').textContent = 'Resolved AWS Marketplace customer ' + resolved.entitlement.customer_identifier + ' and metered ' + (metered.records || []).length + ' usage dimensions.';
+            } catch (e) {
+              fail(e);
+            }
+          };
+        if ($('gtm-export-csv-btn'))
+          $('gtm-export-csv-btn').onclick = async () => {
+            try {
+              const exp = await api(path('export/journal-csv'));
+              download(exp.filename || 'kerdon-journal.csv', 'text/csv', exp.csv || '');
+              $('notice').textContent = 'Downloaded Merkle-sealed journal CSV (' + (exp.filename || 'kerdon-journal.csv') + ').';
             } catch (e) {
               fail(e);
             }

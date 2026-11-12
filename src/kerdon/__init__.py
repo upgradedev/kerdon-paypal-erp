@@ -224,6 +224,8 @@ from .pdf_render import (
     RenderedPdfArtifact,
     next_tenant_document_reference,
     render_outbound_draft_pdf,
+    render_register_document_pdf,
+    resolve_and_render_tenant_pdf,
 )
 from .superset import (
     AuthoritySourceRank,
@@ -454,4 +456,6 @@ __all__ = [
     "build_cash_flow_statement",
     "compute_counterparty_ledger_balances",
     "redact_operations_for_seller",
+    "render_register_document_pdf",
+    "resolve_and_render_tenant_pdf",
 ]

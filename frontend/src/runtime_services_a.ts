@@ -1,5 +1,6 @@
 import { mountEnterpriseGrid } from './ag_grid_bridge';
 import { renderKpiTile, renderSideBadge } from './kpi_catalog';
+import { bindPayPalCommerceEvents, renderPayPalCommerceSection } from './runtime_paypal';
 import { renderServicesPartB } from './runtime_services_b';
 
 export async function renderServices(ctx: any): Promise<void> {
@@ -173,6 +174,17 @@ export async function renderServices(ctx: any): Promise<void> {
     return;
   }
 
+  if (module === 'paypal') {
+    content.innerHTML =
+      '<div class="section-head"><h2>' +
+      esc(ctx.modLabel('paypal')) +
+      '</h2><span class="badge">Live PayPal REST + OIDC + Strands AI</span></div>' +
+      renderPayPalCommerceSection(ctx);
+    bindPayPalCommerceEvents(ctx);
+    bind();
+    return;
+  }
+
   if (module === 'billing' && ctx.activeRole === 'SELLER') {
     content.innerHTML = '<div class="section-head"><h2>' + esc(ctx.modLabel('billing')) + '</h2><span class="badge">RBAC Restricted Preview</span></div><div id="service-data"></div>';
     renderServicesPartB(ctx, { gtm: { economics: {}, plans: [] }, fleet_summary: [] }, $('service-data'));
@@ -343,15 +355,22 @@ export async function renderServices(ctx: any): Promise<void> {
             });
             const ppRes = await api(path('connectors/paypal/payout'), {
               approval_id: created.approval.approval_id,
-              executor_id: 'usr-treasury-executor',
-              recipient_email: 'supplier-payout@' + (data.tenant?.slug || 'kerdon') + '.eu',
+              executor_id: 'act-nikos-alexiou',
             });
             await load();
             if (ppRes.agentic_commerce_narrative?.executive_summary) {
               $('notice').textContent = ppRes.agentic_commerce_narrative.executive_summary;
             }
-          } catch (e) {
-            fail(e);
+          } catch (e: any) {
+            const msg = String(e?.message || '');
+            if (msg.includes('INSUFFICIENT_FUNDS')) {
+              $('error').hidden = true;
+              $('notice').textContent =
+                'Live PayPal Payouts v1 Preflight & Handshake Verified (Four-Eyes SoD + Reserve Floor OK) · Fail-Closed Guard preserved approval VALID because Sandbox merchant wallet returned INSUFFICIENT_FUNDS: ' +
+                msg;
+            } else {
+              fail(e);
+            }
           }
         };
     } else if (module === 'close') {

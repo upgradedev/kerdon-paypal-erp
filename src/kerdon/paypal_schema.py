@@ -454,6 +454,47 @@ def build_default_paypal_seed_bundle(state: Any) -> dict[str, Any]:
         "provider_mode": "paypal-sandbox",
     }
 
+    seeded_orders: list[dict[str, Any]] = [seeded_order]
+    for hist_tag, hist_gross, hist_date in (
+        ("HIST-SEP14", 620_000, "2026-09-14"),
+        ("HIST-AUG29", 372_000, "2026-08-29"),
+    ):
+        h_dig = hashlib.sha256(f"SEED_PPORD:{tid}:{prior_doc_id}:{hist_tag}".encode("utf-8")).hexdigest().upper()
+        h_fee = ((hist_gross * 290) + 5_000) // 10_000 + 35
+        h_oid = f"PPORD-{h_dig[:12]}"
+        seeded_orders.append(
+            {
+                "order_id": h_oid,
+                "paypal_invoice_id": f"PPINV-{h_dig[12:24]}",
+                "capture_id": f"PPCAP-{h_dig[24:36]}",
+                "tenant_id": tid,
+                "document_id": prior_doc_id,
+                "counterparty_id": doc.counterparty_id if doc else "cust_1",
+                "gross_cents": hist_gross,
+                "paypal_fee_cents": h_fee,
+                "net_settled_cents": hist_gross - h_fee,
+                "currency": "EUR",
+                "status": "COMPLETED",
+                "approval_url": f"https://www.sandbox.paypal.com/checkoutnow?token={h_oid}",
+                "journal_event_id": f"ev-{slug}-prior-cash-in",
+                "captured_date": hist_date,
+                "provider_mode": "paypal-sandbox",
+            }
+        )
+
+    sub_dig = hashlib.sha256(f"SEED_PPSUB:{tid}".encode("utf-8")).hexdigest().upper()
+    seeded_subscription = {
+        "product_id": f"PROD-{sub_dig[:10]}",
+        "plan_id": f"P-{sub_dig[10:22]}",
+        "subscription_id": f"I-{sub_dig[22:34]}",
+        "tier_name": "Kerdon Autonomous Mini-ERP Pro",
+        "monthly_price_cents": 14_900,
+        "currency": "EUR",
+        "status": "ACTIVE",
+        "approval_url": f"https://www.sandbox.paypal.com/webapps/billing/subscriptions?ba_token=BA-{sub_dig[34:44]}",
+        "provider_mode": "paypal-sandbox",
+    }
+
     target_seller = (
         state.commission_case.statements[0].seller_id
         if state.commission_case and state.commission_case.statements
@@ -513,6 +554,8 @@ def build_default_paypal_seed_bundle(state: Any) -> dict[str, Any]:
 
     return {
         "order": seeded_order,
+        "orders": seeded_orders,
+        "subscription": seeded_subscription,
         "dispute": seeded_dispute,
         "payout": seeded_payout,
     }

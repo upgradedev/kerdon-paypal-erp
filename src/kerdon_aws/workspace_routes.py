@@ -53,7 +53,7 @@ def workspace_response(
         code_v = qp.get("code") or (q_raw.get("code") or [""])[0]
         state_v = qp.get("state") or (q_raw.get("state") or [""])[0]
         qs_out = urlencode({"paypal_oidc_code": code_v, "paypal_oidc_state": state_v})
-        return redirect_reply(f"/?{qs_out}#module=documents", status=302, head_only=head_only)
+        return redirect_reply(f"/?{qs_out}#module=paypal", status=302, head_only=head_only)
     if path in ("/bounded-contexts", "/erp/bounded-contexts", "/datasets", "/erp/datasets") or path.endswith(("/bounded-contexts", "/datasets")):
         return json_reply(
             200,
@@ -182,6 +182,12 @@ def workspace_response(
                         "subject": e.subject,
                         "parent_message_id": e.parent_message_id,
                         "received_at_epoch": e.received_at_epoch,
+                        "received_at": "2026-10-28",
+                        "sha256_hex": (
+                            e.attachments[0].sha256
+                            if e.attachments
+                            else hashlib.sha256(e.message_id.encode("utf-8")).hexdigest()
+                        ),
                         "attachments": [
                             {
                                 "attachment_id": a.attachment_id,

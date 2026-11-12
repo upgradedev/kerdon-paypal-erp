@@ -4,7 +4,7 @@ import { renderDetail, renderTargets } from './runtime_detail_targets';
 import { renderStatements } from './runtime_statements';
 import { renderServices } from './runtime_services_a';
 import { consumePayPalOidcCallbackIfPresent } from './runtime_paypal';
-import { cents, csv, download, createFormHandlers } from './runtime_forms';
+import { cents, csv, download, downloadPdfBase64, fetchAndDownloadPdf, createFormHandlers } from './runtime_forms';
 import { MODULES, MODULE_BOUNDED_CONTEXT, MODULE_ICONS, NAVIGATION_GROUPS, formatMoney, resolveApiBase } from './api/client';
 
 declare global {
@@ -26,39 +26,17 @@ const ROLE_ALLOWED_MODULES: Record<string, Set<string> | null> = {
   MSP_FINOPS_DIRECTOR: null,
   CLIENT_OWNER: null,
   ACCOUNTANT: new Set([
-    'dashboard',
-    'statements',
-    'customers',
-    'suppliers',
-    'sales',
-    'purchases',
-    'expenses',
-    'payments',
-    'receipts',
-    'accounting',
-    'close',
-    'workforce',
-    'documents',
-    'intelligence',
-    'billing',
+    'dashboard', 'statements', 'customers', 'suppliers', 'sales', 'purchases',
+    'expenses', 'payments', 'receipts', 'accounting', 'paypal', 'close',
+    'workforce', 'documents', 'intelligence', 'billing',
   ]),
   STORE_MANAGER: new Set([
-    'dashboard',
-    'statements',
-    'customers',
-    'suppliers',
-    'sales',
-    'purchases',
-    'expenses',
-    'receipts',
-    'targets',
-    'commissions',
-    'inventory',
-    'documents',
-    'billing',
+    'dashboard', 'statements', 'customers', 'suppliers', 'sales', 'purchases',
+    'expenses', 'receipts', 'targets', 'commissions', 'inventory', 'paypal',
+    'documents', 'billing',
   ]),
   SELLER: new Set(['commissions', 'billing']),
-  PUBLIC_AUDITOR: new Set(['dashboard', 'statements', 'accounting', 'close', 'documents', 'billing']),
+  PUBLIC_AUDITOR: new Set(['dashboard', 'statements', 'accounting', 'paypal', 'close', 'documents', 'billing']),
 };
 
 export function mountWorkspaceRuntime(): void {
@@ -91,6 +69,7 @@ export function mountWorkspaceRuntime(): void {
     payments: 'Πληρωμές',
     inventory: 'Αποθήκη',
     accounting: 'Λογιστική & Ημερολόγιο',
+    paypal: 'PayPal & Agentic Commerce',
     treasury: 'Διαθέσιμα & Εγκρίσεις',
     workforce: 'Μισθοδοσία & ΦΠΑ',
     close: 'Κλείσιμο & Πληρότητα',
@@ -183,7 +162,7 @@ export function mountWorkspaceRuntime(): void {
     cards: 'statements',
     ask: 'intelligence',
     mydata: 'documents',
-    paypal: 'documents',
+    paypal_hub: 'paypal',
   };
 
   function route() {
@@ -666,6 +645,8 @@ export function mountWorkspaceRuntime(): void {
     render,
     cents,
     download,
+    downloadPdfBase64,
+    fetchAndDownloadPdf,
     csv,
     get data() {
       return data;

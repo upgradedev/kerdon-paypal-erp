@@ -114,6 +114,42 @@ class TestKerdonArchonSuperset(unittest.TestCase):
         self.assertTrue(pdf_data["pdf_header"].startswith("%PDF-1.4"))
         self.assertGreater(pdf_data["size_bytes"], 400)
 
+        # Browser navigation (Accept: text/html) returns real binary PDF, never raw JSON
+        bin_res = dispatch_http_event(
+            _http_event(
+                "GET",
+                f"/tenants/{self.tid}/docgen/{draft_id}/pdf",
+                headers={"Accept": "text/html,application/xhtml+xml"},
+            ),
+            store=self.store,
+        )
+        self.assertEqual(bin_res["statusCode"], 200)
+        self.assertTrue(bin_res.get("isBase64Encoded"))
+        self.assertEqual(bin_res["headers"]["content-type"], "application/pdf")
+
+        # Register documents and signed links also resolve to real PDF 1.4 without files.kerdon.ai
+        reg_doc_id = next(iter(self.state.crm.documents))
+        reg_pdf = dispatch_http_event(
+            _http_event("GET", f"/tenants/{self.tid}/docgen/{reg_doc_id}/pdf"),
+            store=self.store,
+        )
+        self.assertEqual(reg_pdf["statusCode"], 200)
+        self.assertTrue(json.loads(reg_pdf["body"])["pdf_header"].startswith("%PDF-1.4"))
+        lnk_res = dispatch_http_event(
+            _http_event("GET", f"/tenants/{self.tid}/documents/{reg_doc_id}/link"),
+            store=self.store,
+        )
+        lnk_url = json.loads(lnk_res["body"])["url"]
+        self.assertNotIn("files.kerdon.ai", lnk_url)
+        self.assertIn(f"/tenants/{self.tid}/docgen/{reg_doc_id}/pdf", lnk_url)
+
+        # PayPal Hub cold-start seed has 3 settled historical orders + 1 active subscription
+        pp_summary = kd.summarize_tenant_connectors(self.state)["paypal"]
+        self.assertGreaterEqual(pp_summary["summary"]["orders_count"], 3)
+        self.assertGreater(pp_summary["summary"]["total_gross_captured_cents"], 1_500_000)
+        self.assertGreater(pp_summary["summary"]["total_paypal_fees_cents"], 0)
+        self.assertGreaterEqual(len(pp_summary["subscriptions"]), 1)
+
         # First dispatch succeeds and reserves tokens
         send1 = dispatch_http_event(
             _http_event("POST", f"/tenants/{self.tid}/docgen/{draft_id}/send", {}),

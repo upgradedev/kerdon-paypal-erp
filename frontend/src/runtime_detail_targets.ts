@@ -4,7 +4,7 @@ import { renderSideBadge } from './kpi_catalog';
 let partyYtdOverride = false;
 
 export function renderDetail(ctx: any): void {
-  const { $, esc, money, status, amount, id, party, source, facts, table, link, journal, journalLines, isGreekOrg, api, path, load, fail, go, bind, data, module, selected, tab } = ctx;
+  const { $, esc, money, status, amount, id, party, source, facts, table, link, journal, journalLines, isGreekOrg, api, path, load, fail, go, bind, fetchAndDownloadPdf, data, module, selected, tab } = ctx;
   const r = data.records[module].find((rec: any) => id(rec) === selected);
   if (!r) {
     $('content').innerHTML = '<div class="empty">Record not found in this company.</div>';
@@ -27,9 +27,15 @@ export function renderDetail(ctx: any): void {
     b.onclick = () => go(module, selected, b.dataset.tabName);
   });
   const body = $('record-body');
-  const docs = [...data.records.sales, ...data.records.purchases].filter((d: any) =>
-    isParty ? d.counterparty_id === r.id : d.document_id === r.document_id
-  );
+  const allDocs = [...(data.records.sales || []), ...(data.records.purchases || []), ...(data.records.expenses || [])];
+  const seenDocIds = new Set<string>();
+  const docs = allDocs.filter((d: any) => {
+    const key = d.document_id || d.event_id;
+    if (!key || seenDocIds.has(key)) return false;
+    const match = isParty ? d.counterparty_id === r.id : (d.document_id && d.document_id === r.document_id) || (d.event_id && d.event_id === r.event_id);
+    if (match) seenDocIds.add(key);
+    return match;
+  });
   if (tab === 'General') {
     const cfg = data.connectors?.config || {};
     const grMode = isGreekOrg();
@@ -66,13 +72,24 @@ export function renderDetail(ctx: any): void {
           '</button></div>'
         : '') +
       mdCardHtml +
-      (r.document_id && status(r) !== 'Reversed'
-        ? '<div class="toolbar section"><button type="button" id="reverse-doc">Reverse document (Credit note)</button>' +
-          (canMyData ? '<button type="button" id="mydata-tx">Transmit / Refresh AADE myDATA (MARK)</button>' : '') +
-          (canPayPal ? '<button type="button" id="paypal-ord" class="primary">Settle via PayPal Checkout (Orders v2)</button>' : '') +
+      (r.document_id || r.event_id
+        ? '<div class="toolbar section"><button type="button" id="download-doc-pdf">↓ Download PDF (%PDF-1.4)</button>' +
+          (r.document_id && status(r) !== 'Reversed'
+            ? '<button type="button" id="reverse-doc">Reverse document (Credit note)</button>' +
+              (canMyData ? '<button type="button" id="mydata-tx">Transmit / Refresh AADE myDATA (MARK)</button>' : '') +
+              (canPayPal ? '<button type="button" id="paypal-ord" class="primary">Settle via PayPal Checkout (Orders v2)</button>' : '')
+            : '') +
           '</div>'
         : '');
     if ($('open-party-card')) $('open-party-card').onclick = () => go(module, selected, 'Account statement');
+    if ($('download-doc-pdf'))
+      $('download-doc-pdf').onclick = async () => {
+        try {
+          await fetchAndDownloadPdf(ctx, r.document_id || r.event_id);
+        } catch (e) {
+          fail(e);
+        }
+      };
     if ($('reverse-doc'))
       $('reverse-doc').onclick = async () => {
         try {
@@ -94,9 +111,19 @@ export function renderDetail(ctx: any): void {
     if ($('paypal-ord'))
       $('paypal-ord').onclick = async () => {
         try {
-          const ppRes = await api(path('connectors/paypal/order'), { document_id: r.document_id, auto_capture: true });
+          const isLive = Boolean(data.connectors?.runtime_modes?.paypal_credentials_present);
+          const ppRes = await api(path('connectors/paypal/order'), {
+            document_id: r.document_id,
+            auto_capture: !isLive,
+          });
           await load();
-          if (ppRes.agentic_commerce_narrative?.executive_summary) {
+          if (!ppRes.captured) {
+            $('notice').textContent =
+              'Created Live PayPal Order ' +
+              (ppRes.order?.order_id || '') +
+              ' [CREATED]. Approve buyer checkout in PayPal Commerce Hub to capture 3-line GL split.';
+            go('paypal');
+          } else if (ppRes.agentic_commerce_narrative?.executive_summary) {
             $('notice').textContent = ppRes.agentic_commerce_narrative.executive_summary;
           }
         } catch (e) {
@@ -159,21 +186,38 @@ export function renderDetail(ctx: any): void {
     );
   } else {
     body.innerHTML = table(
-      ['Document', 'Date', 'Source hash', 'Access'],
-      docs.map((d: any) => [
-        source(d.document_id),
-        esc(d.issued_date),
-        '<span class="hash">' + esc(d.source_sha256) + '</span>',
-        '<button type="button" data-source="' + esc(d.document_id) + '">Request source link</button>',
-      ])
+      ['Document', 'Date', 'Source SHA-256 hash', 'PDF & Signed Evidence'],
+      docs.map((d: any) => {
+        const docId = d.document_id || d.event_id;
+        return [
+          source(docId),
+          esc(d.issued_date || d.posted_date || '-'),
+          '<span class="hash">' + esc(d.source_sha256 || '-') + '</span>',
+          '<button type="button" class="primary" data-doc-pdf="' +
+            esc(docId) +
+            '">↓ Download PDF</button> ' +
+            (d.document_id
+              ? '<button type="button" data-source="' + esc(d.document_id) + '">Verify 300s signed link</button>'
+              : ''),
+        ];
+      })
     );
+    body.querySelectorAll('[data-doc-pdf]').forEach((b: any) => {
+      b.onclick = async () => {
+        try {
+          await fetchAndDownloadPdf(ctx, b.dataset.docPdf);
+        } catch (e) {
+          fail(e);
+        }
+      };
+    });
     body.querySelectorAll('[data-source]').forEach((b: any) => {
       b.onclick = async () => {
         try {
           const result = await api(path('documents/' + encodeURIComponent(b.dataset.source) + '/link'));
           const url = new URL(result.url, window.location.href);
           if (!['http:', 'https:'].includes(url.protocol)) throw Error('Unsupported source URL');
-          body.insertAdjacentHTML('beforeend', '<p><a target="_blank" rel="noopener noreferrer" href="' + esc(url.href) + '">Open source evidence ↗</a></p>');
+          body.insertAdjacentHTML('beforeend', '<p><a target="_blank" rel="noopener noreferrer" href="' + esc(url.href) + '">Open signed PDF evidence (300s TTL) ↗</a></p>');
         } catch (e) {
           fail(e);
         }

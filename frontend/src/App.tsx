@@ -30,7 +30,7 @@ export function App() {
         <div id="sidebar-org-pill" className="org-pill"></div>
         <nav id="nav" aria-label="ERP modules"></nav>
         <div id="legacy" className="legacy">
-          Sofia Marinou · Double-Entry GL · PayPal &amp; ISO 20022
+          Sofia Marinou · Double-Entry GL · ISO 20022
         </div>
       </aside>
 
@@ -74,7 +74,7 @@ export function App() {
               <h1 id="title">Dashboard</h1>
               <p id="company-name" hidden></p>
               <p id="j5-tagline" style={{ fontSize: '12px', margin: '4px 0 0' }}>
-                Kerdon turns PayPal checkouts, subscriptions, disputes, and bills into a balanced double-entry ledger, seller commissions, and Four-Eyes governed payouts.
+                Kerdon MSP turns client emails and bills into a balanced double-entry ledger, seller commissions, auto-drafted fixes, and invalidated stale payouts on AWS.
               </p>
               <button id="shell-self-approve-guard" type="button" disabled aria-describedby="four-eyes-policy" hidden>
                 Self-Approve Own Payout
@@ -118,7 +118,7 @@ export function App() {
           <div id="draft-error" role="alert"></div>
           <div className="dialog-foot">
             <button type="button" id="save-draft">
-              Download draft
+              Download draft PDF
             </button>
             <button type="submit" id="submit-document" className="primary">
               Submit to existing backend

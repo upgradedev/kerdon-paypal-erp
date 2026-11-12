@@ -182,8 +182,8 @@ class CommercialRegistry:
             )
         ).hexdigest()[:24]
         url = (
-            f"https://files.kerdon.ai/v1/tenants/{self.tenant_id}/docs/{doc.document_id}"
-            f"?sha256={doc.source_sha256[:16]}&expires={expires_at}&sig={sig}"
+            f"/tenants/{self.tenant_id}/docgen/{doc.document_id}/pdf"
+            f"?format=binary&sha256={doc.source_sha256[:16]}&expires={expires_at}&sig={sig}"
         )
         return SignedDownloadLink(
             document_id=doc.document_id,

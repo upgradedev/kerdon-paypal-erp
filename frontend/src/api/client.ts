@@ -12,6 +12,7 @@ export const MODULES: Record<ModuleKey, string> = {
   receipts: 'Cash receipts',
   targets: 'Sales targets',
   accounting: 'Accounting',
+  paypal: 'PayPal Commerce',
   treasury: 'Treasury',
   close: 'Close & completeness',
   commissions: 'Commissions',
@@ -29,7 +30,7 @@ export const NAVIGATION_GROUPS: [string, ModuleKey[]][] = [
   ['Sales & Commissions', ['targets', 'commissions']],
   ['Inventory & Supply Chain', ['inventory']],
   ['Record-to-Report (GL & Tax)', ['accounting', 'close', 'workforce', 'documents']],
-  ['Treasury & Governance', ['treasury', 'billing']],
+  ['Treasury & Governance', ['paypal', 'treasury', 'billing']],
 ];
 
 export const MODULE_BOUNDED_CONTEXT: Record<ModuleKey, { code: string; name: string; standard: string }> = {
@@ -50,6 +51,7 @@ export const MODULE_BOUNDED_CONTEXT: Record<ModuleKey, { code: string; name: str
   close: { code: 'BC-R2R', name: 'Record-to-Report (GL & Tax)', standard: 'ADR-023/024/042 24-Rule Completeness & GapReasoner' },
   workforce: { code: 'BC-R2R', name: 'Record-to-Report (GL & Tax)', standard: 'ADR-031 3-Document Payroll Fusion (Register + APD + FMY)' },
   documents: { code: 'BC-R2R', name: 'Record-to-Report (GL & Tax)', standard: 'ADR-022/028/048 Evidence Inbox, DocGen & Statutory Tax' },
+  paypal: { code: 'BC-PAY', name: 'Treasury & Governance', standard: 'PayPal Orders v2 · Subscriptions v1 · Payouts v1 · Disputes v1 · OIDC · Strands AI' },
   treasury: { code: 'BC-TRM', name: 'Treasury & Governance', standard: 'ISO 20022 Multi-Currency Treasury & Stale-Approval Guard' },
   billing: { code: 'BC-TRM', name: 'Treasury & Governance', standard: 'ADR-044/052 Multi-Tenant RBAC, Connectors & Public Datasets' },
 };
@@ -75,6 +77,7 @@ export const MODULE_ICONS: Record<ModuleKey, string> = {
   close: svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>'),
   workforce: svg('<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>'),
   documents: svg('<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'),
+  paypal: svg('<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 10h20"/><path d="M7 15h4"/><circle cx="17" cy="15" r="1.5"/>'),
   treasury: svg('<line x1="3" y1="22" x2="21" y2="22"/><line x1="6" y1="18" x2="6" y2="11"/><line x1="10" y1="18" x2="10" y2="11"/><line x1="14" y1="18" x2="14" y2="11"/><line x1="18" y1="18" x2="18" y2="11"/><polygon points="12 2 20 7 4 7"/>'),
   billing: svg('<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>'),
 };

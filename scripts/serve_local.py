@@ -2,6 +2,7 @@
 """Dependency-free local HTTP server for Kerdon MSP Mini-ERP Cockpit and API."""
 from __future__ import annotations
 
+import base64
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import sys
@@ -32,7 +33,8 @@ class KerdonLocalHandler(BaseHTTPRequestHandler):
             self.send_header(hk, hv)
         self.end_headers()
         if method != "HEAD":
-            body_bytes = str(resp.get("body") or "").encode("utf-8")
+            raw_out = str(resp.get("body") or "")
+            body_bytes = base64.b64decode(raw_out) if resp.get("isBase64Encoded") else raw_out.encode("utf-8")
             self.wfile.write(body_bytes)
 
     def do_GET(self) -> None:  # noqa: N802

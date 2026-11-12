@@ -43,6 +43,10 @@ def handle_get_inventory(
     snap_dict = reader.read(tid, lambda: asdict(snap))
     payload = {
         **snap_dict,
+        "total_inventory_valuation_cents": snap_dict["total_valuation_cents"],
+        "total_cogs_cents": snap_dict["period_cogs_cents"],
+        "low_stock_alert_count": snap_dict["low_stock_count"],
+        "reorder_purchase_orders": snap_dict["purchase_order_drafts"],
         "inventory": {
             **snap_dict,
             "sku_items": snap_dict["skus"],

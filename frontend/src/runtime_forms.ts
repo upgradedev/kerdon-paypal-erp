@@ -16,6 +16,29 @@ export function download(name: string, type: string, text: string) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+export function downloadPdfBase64(name: string, b64: string) {
+    const raw = atob(b64);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name.endsWith('.pdf') ? name : name + '.pdf';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+
+export async function fetchAndDownloadPdf(ctx: any, docOrDraftId: string) {
+    const res = await ctx.api(ctx.path('docgen/' + encodeURIComponent(docOrDraftId) + '/pdf?format=json'));
+    if (!res?.pdf_base64) throw Error('PDF renderer returned empty payload');
+    const fn = res.filename || docOrDraftId + '.pdf';
+    downloadPdfBase64(fn, res.pdf_base64);
+    if (ctx.$('notice')) {
+      ctx.$('notice').textContent =
+        'Downloaded verified PDF 1.4 (' + fn + ' · SHA-256 ' + String(res.sha256 || '').slice(0, 14) + '…).';
+    }
+  }
+
 export function csv(records: any[]) {
     const keys = [...new Set(records.flatMap((r) => Object.keys(r)))].filter((k) => !['lines', 'line_items', 'allocations', 'historical_invoice_cents'].includes(k));
     const cell = (v: unknown) => '"' + String(v ?? '').replace(/^([=+@-])/, '\t$1').replaceAll('"', '""') + '"';
@@ -438,25 +461,37 @@ export function createFormHandlers(ctx: any) {
     };
     $('save-draft').onclick = async () => {
       const data = ctx.data;
-    capture();
-    try {
-      if (data?.capabilities?.invoice_submission) {
-        await api(path('drafts'), {
-          draft_id: draft.document_id,
-          module: draft.module,
-          counterparty_id: draft.counterparty_id,
-          invoice_number: draft.invoice_number,
-          issued_date: draft.issued_date,
-          due_date: draft.due_date,
-          description: draft.description,
-        });
+      capture();
+      try {
+        if (data?.capabilities?.invoice_submission) {
+          const validLines = (draft.lines || [])
+            .filter((l: any) => l.net && /^\d+(\.\d{1,2})?$/.test(String(l.net).trim()))
+            .map((l: any, idx: number) => ({
+              line_number: idx + 1,
+              description: l.description || draft.description || 'Draft line item',
+              quantity: 1,
+              unit_price_cents: cents(l.net),
+              vat_rate_pct: Number(l.vat ?? 24),
+            }));
+          await api(path('drafts'), {
+            draft_id: draft.document_id,
+            module: draft.module,
+            counterparty_id: draft.counterparty_id || 'DRAFT',
+            invoice_number: draft.invoice_number || draft.document_id,
+            issued_date: draft.issued_date,
+            due_date: draft.due_date,
+            description: draft.description || 'Workspace draft',
+            lines: validLines,
+          });
+        }
+        await fetchAndDownloadPdf(ctx, draft.document_id);
+      } catch {
+        download(
+          'kerdon-draft-' + draft.document_id + '.csv',
+          'text/csv',
+          csv([{ draft_id: draft.document_id, module: draft.module, counterparty_id: draft.counterparty_id, issued_date: draft.issued_date, status: 'DRAFT_NOT_POSTED' }])
+        );
       }
-    } catch {}
-    download(
-      'kerdon-draft-' + draft.document_id + '.json',
-      'application/json',
-      JSON.stringify({ ...draft, status: 'DRAFT_NOT_POSTED', durable: Boolean(data?.capabilities?.invoice_submission) }, null, 2)
-    );
     };
     $('close-dialog').onclick = () => $('draft-dialog').close();
     if ($('cmd-btn')) $('cmd-btn').onclick = openCmd;

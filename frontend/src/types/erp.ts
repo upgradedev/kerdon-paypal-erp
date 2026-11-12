@@ -11,6 +11,7 @@ export type ModuleKey =
   | 'targets'
   | 'accounting'
   | 'treasury'
+  | 'paypal'
   | 'close'
   | 'commissions'
   | 'inventory'
