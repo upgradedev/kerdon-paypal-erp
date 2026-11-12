@@ -87,6 +87,7 @@ export function syncAgTheme(): void {
       entry.chart.destroy();
       entry.el.innerHTML = '';
       entry.chart = AgCharts.create(buildChartThemeOptions({ ...entry.baseOpts, container: entry.el }) as any);
+      stampChartAlt(entry.el, String(entry.baseOpts.ariaLabel || 'Financial chart'));
     } catch {
       // ignore
     }
@@ -454,10 +455,20 @@ export function mountEnterpriseGrid(container: HTMLElement | null, cfg: Enterpri
   return api;
 }
 
+function stampChartAlt(container: HTMLElement, label: string): void {
+  container.querySelectorAll('[role="img"]').forEach((el: any) => {
+    if (!el.getAttribute('aria-label')) {
+      el.setAttribute('aria-label', label);
+    }
+  });
+}
+
 function buildChartThemeOptions(baseOpts: Record<string, any>): Record<string, any> {
   const light = isLightMode();
+  const { ariaLabel, ...chartOpts } = baseOpts;
   return {
-    ...baseOpts,
+    ...chartOpts,
+    ariaLabel: ariaLabel || 'Financial chart',
     theme: light ? 'ag-default' : 'ag-default-dark',
     background: { fill: light ? '#ffffff' : '#141a2e' },
   };
@@ -468,8 +479,12 @@ export function mountEnterpriseChart(container: HTMLElement | null, baseOpts: Re
   pruneDetached();
   container.innerHTML = '';
   try {
+    const label = String(baseOpts.ariaLabel || 'Financial chart');
     const fullOpts = buildChartThemeOptions({ ...baseOpts, container });
     const chart = AgCharts.create(fullOpts as any);
+    stampChartAlt(container, label);
+    const obs = new MutationObserver(() => stampChartAlt(container, label));
+    obs.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['role'] });
     activeCharts.add({ el: container, chart, baseOpts });
     return chart;
   } catch {

@@ -93,17 +93,18 @@ export function renderStatements(ctx: any): void {
     const rev = pnl.total_revenue_cents || 0;
     const pct = (v: number) => (rev > 0 ? ((v / rev) * 100).toFixed(1) + '%' : '0.0%');
     chartRow.innerHTML =
-      '<div class="chart-card"><h3>' +
+      '<div class="chart-card"><h2>' +
       esc(t('Income Statement Waterfall (AG Charts)', 'Γράφημα Αποτελεσμάτων Χρήσης (AG Charts)')) +
-      '</h3><div class="chart-sub">' +
+      '</h2><div class="chart-sub">' +
       esc(data.dashboard.start + ' -> ' + data.dashboard.end) +
       '</div><div id="ag-pnl-chart" style="height:250px"></div></div>' +
-      '<div class="chart-card"><h3>' +
+      '<div class="chart-card"><h2>' +
       esc(t('Operating Cost Composition', 'Διάρθρωση Λειτουργικού Κόστους')) +
-      '</h3><div class="chart-sub">' +
+      '</h2><div class="chart-sub">' +
       esc(t('COGS, Payroll Fusion, Commissions & OpEx', 'Κόστος Πωληθέντων, Μισθοδοσία, Προμήθειες & Έξοδα')) +
       '</div><div id="ag-opex-chart" style="height:250px"></div></div>';
     mountEnterpriseChart($('ag-pnl-chart'), {
+      ariaLabel: 'Income Statement Waterfall Chart',
       data: [
         { item: t('Net Revenue', 'Έσοδα'), eur: (pnl.total_revenue_cents || 0) / 100 },
         { item: t('Gross Profit', 'Μικτό Κέρδος'), eur: (pnl.gross_profit_cents || 0) / 100 },
@@ -113,6 +114,7 @@ export function renderStatements(ctx: any): void {
       series: [{ type: 'bar', xKey: 'item', yKey: 'eur', yName: 'EUR', fill: '#6366f1', cornerRadius: 4 }],
     });
     mountEnterpriseChart($('ag-opex-chart'), {
+      ariaLabel: 'Operating Cost Composition Chart',
       data: [
         { category: t('COGS (5000)', 'Κόστος Πωλ.'), eur: Math.max(0, (pnl.cogs_5000_cents || 0) / 100) },
         { category: t('Workforce (6000)', 'Μισθοδοσία'), eur: Math.max(0, (pnl.workforce_6000_cents || 0) / 100) },
@@ -205,12 +207,13 @@ export function renderStatements(ctx: any): void {
     });
   } else if (activeStatementTab === 'cf') {
     chartRow.innerHTML =
-      '<div class="chart-card" style="grid-column:1/-1"><h3>' +
+      '<div class="chart-card" style="grid-column:1/-1"><h2>' +
       esc(t('IAS 7 Direct-Method Cash Bridge (Opening -> Operating -> Closing Cash)', 'Γέφυρα Ταμειακών Ροών ΔΛΠ 7 (Αρχικό -> Λειτουργικές Ροές -> Τελικό Ταμείο)')) +
-      '</h3><div class="chart-sub">' +
+      '</h2><div class="chart-sub">' +
       esc(t('100% Reconciled to GL 1000_CASH and Dashboard Cash Tile', '100% Συμφωνία με Λογ. 1000_CASH και Καρτέλα Ταμείου')) +
       '</div><div id="ag-cf-chart" style="height:240px"></div></div>';
     mountEnterpriseChart($('ag-cf-chart'), {
+      ariaLabel: 'IAS 7 Direct-Method Cash Flow Bridge Chart',
       data: [
         { step: t('Opening Cash', 'Αρχικό Ταμείο'), eur: (cf.opening_cash_cents || 0) / 100 },
         { step: t('(+) Customer Receipts', '(+) Εισπράξεις Πελατών'), eur: (cfOp.receipts_from_customers_cents || 0) / 100 },
